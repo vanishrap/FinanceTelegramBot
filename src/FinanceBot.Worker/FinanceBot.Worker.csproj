@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker"><ItemGroup><ProjectReference Include="../FinanceBot.Infrastructure/FinanceBot.Infrastructure.csproj" /><PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" /></ItemGroup><ItemGroup><None Update="appsettings.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None></ItemGroup></Project>
