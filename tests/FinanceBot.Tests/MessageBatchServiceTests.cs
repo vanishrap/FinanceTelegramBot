@@ -38,6 +38,42 @@ public sealed class MessageBatchServiceTests
         }
     }
 
+    [Fact]
+    public async Task AddAsync_ReopensNeedsReviewBatchAndPreservesConversation()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-review-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+                var user = new User { TelegramUserId = 42, Name = "Test", CreatedAt = DateTimeOffset.UtcNow };
+                db.InputBatches.Add(new InputBatch
+                {
+                    User = user, StartedAt = DateTimeOffset.UtcNow.AddMinutes(-2), LastMessageAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+                    Status = BatchStatus.NeedsReview,
+                    Messages = [new InputMessage { TelegramMessageId = 100, Type = InputMessageType.Text, Text = "Кофе 12", CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1) }]
+                });
+                await db.SaveChangesAsync();
+            }
+            var service = new MessageBatchService(factory, new FinanceOptions { AllowedTelegramUserIds = [42] }, NullLogger<MessageBatchService>.Instance);
+
+            Assert.True(await service.AddAsync(new TelegramUpdate(2, 101, 42, "Test", "С карты, категория кафе", null, null), CancellationToken.None));
+
+            await using var verification = factory.CreateDbContext();
+            var batch = await verification.InputBatches.Include(x => x.Messages).SingleAsync();
+            Assert.Equal(BatchStatus.Collecting, batch.Status);
+            Assert.Equal(2, batch.Messages.Count);
+            Assert.Contains(batch.Messages, x => x.Text == "Кофе 12");
+            Assert.Contains(batch.Messages, x => x.Text == "С карты, категория кафе");
+        }
+        finally
+        {
+            File.Delete(databasePath);
+        }
+    }
+
     private static async Task SeedBatchesAsync(IDbContextFactory<FinanceDbContext> factory)
     {
         await using var db = await factory.CreateDbContextAsync();

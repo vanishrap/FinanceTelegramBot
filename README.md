@@ -35,6 +35,11 @@ acknowledged without being persisted.
 * `/help` shows the available commands in Telegram.
 
 Messages that are not commands continue through the normal AI transaction extraction flow.
+They are collected into one batch until 60 seconds have passed without a new message; every new
+message resets that delay. If an account, category, date, or another material detail is missing or
+ambiguous, the bot asks a specific follow-up question and keeps the batch. The user's reply reopens
+that same batch, so the original messages and attachments remain available. An explicitly stated
+transaction date is stored; otherwise the first message timestamp is used.
 
 ## Architecture
 
