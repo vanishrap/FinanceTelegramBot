@@ -20,7 +20,7 @@ public interface ITelegramClient { Task<IReadOnlyList<TelegramUpdate>> GetUpdate
 public interface IVoiceTranscriptionService { Task<string> TranscribeAsync(TelegramFile file, CancellationToken ct); }
 public interface IAiExtractionService { Task<string> ExtractAsync(AiInput input, CancellationToken ct); }
 public sealed record AiInput(IReadOnlyList<string> Texts, IReadOnlyList<string> ImageDataUrls, string ContextJson);
-public sealed record ExtractedOperation(string Kind, decimal Amount, string Currency, string Description, string? Merchant, long? AccountId, long? ToAccountId, ReceiptDraft? Receipt, long? CategoryId = null);
+public sealed record ExtractedOperation(string Kind, decimal Amount, string Currency, string Description, string? Merchant, long? AccountId, long? ToAccountId, ReceiptDraft? Receipt, long? CategoryId = null, DateTimeOffset? TransactionDate = null, string? ClarificationQuestion = null);
 public sealed record ReceiptDraft(decimal Subtotal, decimal Tax, decimal ServiceCharge, decimal Discount, decimal Rounding, decimal Total, IReadOnlyList<ReceiptItemDraft> Items);
 public sealed record ReceiptItemDraft(string Name, decimal Quantity, decimal UnitPrice, decimal BaseAmount, decimal Discount, decimal TaxAllocated, decimal ServiceChargeAllocated, decimal FinalAmount, long? CategoryId, decimal Confidence);
 public sealed record ValidationCheck(string Type, decimal Expected, decimal Actual, bool Passed, string Message);

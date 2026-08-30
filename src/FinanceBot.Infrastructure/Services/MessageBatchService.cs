@@ -14,9 +14,11 @@ public sealed class MessageBatchService(IDbContextFactory<FinanceDbContext> fact
   var now=DateTimeOffset.UtcNow; var user=await db.Users.SingleOrDefaultAsync(x=>x.TelegramUserId==update.UserId,ct) ?? new User{TelegramUserId=update.UserId,Name=update.UserName,CreatedAt=now}; if(user.Id==0) db.Users.Add(user);
   // SQLite cannot translate ordering by DateTimeOffset. Keep the selective part of
   // the query in SQL and order the user's collecting batches in memory.
-  var collectingBatches=await db.InputBatches.Where(x=>x.UserId==user.Id && x.Status==BatchStatus.Collecting).ToListAsync(ct);
+  // A reply to a clarification belongs to the original batch. Reopen it so all
+  // original messages, attachments and the user's answer are extracted together.
+  var collectingBatches=await db.InputBatches.Where(x=>x.UserId==user.Id && (x.Status==BatchStatus.Collecting || x.Status==BatchStatus.NeedsReview)).ToListAsync(ct);
   var batch=collectingBatches.MaxBy(x=>x.LastMessageAt);
-  if(batch is null) { batch=new InputBatch{User=user,StartedAt=now,LastMessageAt=now,Status=BatchStatus.Collecting}; db.InputBatches.Add(batch); } else batch.LastMessageAt=now;
+  if(batch is null) { batch=new InputBatch{User=user,StartedAt=now,LastMessageAt=now,Status=BatchStatus.Collecting}; db.InputBatches.Add(batch); } else { batch.LastMessageAt=now; batch.Status=BatchStatus.Collecting; batch.ProcessingStartedAt=null; }
   var message = update.VoiceFileId is not null ? new InputMessage { TelegramMessageId=update.MessageId, Type=InputMessageType.Voice, Text=update.Text, TelegramFileId=update.VoiceFileId, CreatedAt=now } : update.PhotoFileId is not null ? new InputMessage { TelegramMessageId=update.MessageId, Type=InputMessageType.Photo, Text=update.Text, TelegramFileId=update.PhotoFileId, CreatedAt=now } : new InputMessage { TelegramMessageId=update.MessageId, Type=InputMessageType.Text, Text=update.Text, CreatedAt=now };
   batch.Messages.Add(message);
   await db.SaveChangesAsync(ct);
