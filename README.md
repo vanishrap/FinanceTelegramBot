@@ -41,6 +41,13 @@ ambiguous, the bot asks a specific follow-up question and keeps the batch. The u
 that same batch, so the original messages and attachments remain available. An explicitly stated
 transaction date is stored; otherwise the first message timestamp is used.
 
+Natural-language questions are handled as analytics instead of transactions. The AI can build a
+read-only query for arbitrary periods, merchants, categories, accounts, receipts, and combinations
+of them. The query is executed with the Telegram user's internal ID, strict read-only validation,
+a timeout, and a row cap. Its JSON result is then returned to the AI together with the original
+conversation so it can produce a readable Russian answer. Different currencies are never summed
+together.
+
 ## Architecture
 
 * `FinanceBot.Domain` contains the ledger, receipt, debt, input and audit model.
