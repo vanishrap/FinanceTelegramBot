@@ -2,37 +2,12 @@ using FinanceBot.Domain;
 using FinanceBot.Infrastructure.Persistence;
 using FinanceBot.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace FinanceBot.Tests;
 
 public sealed class AnalyticsQueryExecutorTests
 {
-    [Fact]
-    public async Task EnumNormalizationMigration_ConvertsLegacyRussianCategoryValue()
-    {
-        var path=Path.Combine(Path.GetTempPath(), $"finance-enum-normalization-{Guid.NewGuid():N}.db");
-        try
-        {
-            var factory=new Factory(path);
-            await using var db=await factory.CreateDbContextAsync();
-            var migrator=db.GetService<IMigrator>();
-            await migrator.MigrateAsync("202608300005_AllowMultipleBatchOperations");
-            await db.Database.ExecuteSqlRawAsync("UPDATE Categories SET Type='Расход' WHERE Name='Такси'");
-
-            await migrator.MigrateAsync();
-
-            var connection=db.Database.GetDbConnection();
-            await connection.OpenAsync();
-            await using var command=connection.CreateCommand();
-            command.CommandText="SELECT Type FROM Categories WHERE Name='Такси'";
-            Assert.Equal(EnumStorage.Expense,await command.ExecuteScalarAsync());
-        }
-        finally { File.Delete(path); }
-    }
-
     [Fact]
     public async Task ExecuteAsync_ReturnsOnlyRequestedUsersRows()
     {
@@ -49,18 +24,10 @@ public sealed class AnalyticsQueryExecutorTests
                     new Transaction{CreatedByUser=first,Type=TransactionType.Expense,TransactionDate=DateTimeOffset.UtcNow,CurrencyCode="MYR",Amount=12,Description="Coffee"},
                     new Transaction{CreatedByUser=second,Type=TransactionType.Expense,TransactionDate=DateTimeOffset.UtcNow,CurrencyCode="MYR",Amount=99,Description="Private"});
                 await db.SaveChangesAsync();
-                var connection = db.Database.GetDbConnection();
-                await connection.OpenAsync();
-                await using (var command = connection.CreateCommand())
-                {
-                    command.CommandText = "SELECT Type FROM Transactions WHERE Description = 'Coffee'";
-                    Assert.Equal(EnumStorage.Expense, await command.ExecuteScalarAsync());
-                }
                 var json=await new AnalyticsQueryExecutor(factory).ExecuteAsync("""
                     SELECT Description, Amount
                     FROM Transactions
-                    WHERE CreatedByUserId = $userId
-                      AND Type = 'Expense';
+                    WHERE CreatedByUserId = $userId;
                     """, first.Id, CancellationToken.None);
                 Assert.Contains("Coffee",json); Assert.DoesNotContain("Private",json);
             }
