@@ -11,7 +11,37 @@ namespace FinanceBot.Tests;
 public sealed class BatchProcessorTests
 {
     [Fact]
-    public async Task ProcessDueAsync_UsesFallbackAccountAndReplies_WhenAiDoesNotSelectAccount()
+    public async Task ProcessDueAsync_AsksWhatExpenseWasFor_WhenOnlyAmountWasProvided()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-purpose-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            var (accountId, _) = await SeedAsync(factory);
+            var telegram = new RecordingTelegramClient();
+            var extraction = new StubExtractionService($$"""
+                {"kind":"Expense","amount":457,"currency":"MYR","description":"Расход","merchant":null,"accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":null,"transactionDate":null,"clarificationQuestion":null}
+                """);
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
+                new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            await using var db = factory.CreateDbContext();
+            Assert.Empty(await db.Transactions.ToListAsync());
+            Assert.Equal(BatchStatus.NeedsReview, (await db.InputBatches.SingleAsync()).Status);
+            var reply = Assert.Single(telegram.SentMessages);
+            Assert.Contains("на что именно", reply, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("категорию", reply, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_AsksForAccountAndKeepsBatch_WhenAiDoesNotSelectAccount()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"finance-fallback-{Guid.NewGuid():N}.db");
         try
@@ -28,13 +58,12 @@ public sealed class BatchProcessorTests
             await processor.ProcessDueAsync(CancellationToken.None);
 
             await using var db = factory.CreateDbContext();
-            var transaction = await db.Transactions.Include(x => x.Movements).ThenInclude(x => x.Account).SingleAsync();
-            Assert.Equal(-48m, Assert.Single(transaction.Movements).Amount);
-            Assert.Equal("Не указан", transaction.Movements[0].Account.Name);
+            Assert.Empty(await db.Transactions.ToListAsync());
+            Assert.Equal(BatchStatus.NeedsReview, (await db.InputBatches.SingleAsync()).Status);
             var reply = Assert.Single(telegram.SentMessages);
-            Assert.Contains("Транзакция записана", reply);
-            Assert.Contains("Сумма: 48.00 MYR", reply);
-            Assert.Contains("Счёт: Не указан", reply);
+            Assert.Contains("не могу записать", reply);
+            Assert.Contains("счёт", reply, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("ответным сообщением", reply);
         }
         finally
         {
@@ -51,8 +80,9 @@ public sealed class BatchProcessorTests
             var factory = new TestDbContextFactory(databasePath);
             var (accountId, categoryId) = await SeedAsync(factory);
             var telegram = new RecordingTelegramClient();
+            var transactionDate = new DateTimeOffset(2026, 8, 27, 18, 30, 0, TimeSpan.FromHours(8));
             var extraction = new StubExtractionService($$"""
-                {"kind":"Expense","amount":25.50,"currency":"MYR","description":"Поездка домой","merchant":"Такси","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{categoryId}}}
+                {"kind":"Expense","amount":25.50,"currency":"MYR","description":"Поездка домой","merchant":"Такси","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{categoryId}},"transactionDate":"{{transactionDate:O}}","clarificationQuestion":null}
                 """);
             var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
                 new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
@@ -63,11 +93,13 @@ public sealed class BatchProcessorTests
             var transaction = await db.Transactions.Include(x => x.Category).SingleAsync();
             Assert.Equal(categoryId, transaction.CategoryId);
             Assert.Equal(25.50m, transaction.Amount);
+            Assert.Equal(transactionDate, transaction.TransactionDate);
             var reply = Assert.Single(telegram.SentMessages);
             Assert.Contains("Транзакция записана", reply);
             Assert.Contains("Сумма: 25.50 MYR", reply);
             Assert.Contains("Категория: Транспорт → Такси", reply);
             Assert.Contains("Счёт: Наличные", reply);
+            Assert.Contains("Дата: 27.08.2026 18:30 +08:00", reply);
         }
         finally
         {
