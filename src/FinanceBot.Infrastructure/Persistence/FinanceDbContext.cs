@@ -21,6 +21,7 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options)
         b.Entity<ExchangeDetail>().HasKey(x => x.TransactionId);
         b.Entity<ExchangeDetail>().HasOne(x => x.Transaction).WithOne().HasForeignKey<ExchangeDetail>(x => x.TransactionId);
         b.Entity<DebtPayment>().HasIndex(x => new { x.DebtId, x.PaidAt });
+        b.Entity<Debt>().HasIndex(x => x.InputBatchId).IsUnique();
         b.Entity<AiRun>().HasIndex(x => x.InputBatchId);
         b.Entity<AuditLog>().HasIndex(x => new { x.EntityType, x.EntityId });
         foreach (var type in b.Model.GetEntityTypes()) foreach (var property in type.GetProperties().Where(p => p.ClrType == typeof(decimal))) { property.SetPrecision(18); property.SetScale(4); }
