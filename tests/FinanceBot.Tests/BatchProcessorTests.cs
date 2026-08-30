@@ -22,7 +22,7 @@ public sealed class BatchProcessorTests
             var extraction = new StubExtractionService($$"""
                 {"kind":"Expense","amount":457,"currency":"MYR","description":"Расход","merchant":null,"accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":null,"transactionDate":null,"clarificationQuestion":null}
                 """);
-            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
                 new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
 
             await processor.ProcessDueAsync(CancellationToken.None);
@@ -52,7 +52,7 @@ public sealed class BatchProcessorTests
             var extraction = new StubExtractionService($$"""
                 {"kind":"Expense","amount":48,"currency":"MYR","description":"Поездка Grab","merchant":"Grab","accountId":null,"toAccountId":null,"receipt":null,"categoryId":{{categoryId}}}
                 """);
-            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
                 new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
 
             await processor.ProcessDueAsync(CancellationToken.None);
@@ -84,7 +84,7 @@ public sealed class BatchProcessorTests
             var extraction = new StubExtractionService($$"""
                 {"kind":"Expense","amount":25.50,"currency":"MYR","description":"Поездка домой","merchant":"Такси","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{categoryId}},"transactionDate":"{{transactionDate:O}}","clarificationQuestion":null}
                 """);
-            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
                 new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
 
             await processor.ProcessDueAsync(CancellationToken.None);
@@ -144,6 +144,18 @@ public sealed class BatchProcessorTests
     private sealed class StubExtractionService(string output) : IAiExtractionService
     {
         public Task<string> ExtractAsync(AiInput input, CancellationToken ct) => Task.FromResult(output);
+    }
+
+
+    private sealed class StubAnalyticsService : IAiAnalyticsService
+    {
+        public Task<AnalyticsPlan> PlanAsync(AiInput input, CancellationToken ct) => Task.FromResult(new AnalyticsPlan(false, null, null));
+        public Task<string> AnswerAsync(AiInput input, AnalyticsPlan plan, string queryResultsJson, CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    private sealed class StubQueryExecutor : IAnalyticsQueryExecutor
+    {
+        public Task<string> ExecuteAsync(string sql, long userId, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class StubTranscriptionService : IVoiceTranscriptionService
