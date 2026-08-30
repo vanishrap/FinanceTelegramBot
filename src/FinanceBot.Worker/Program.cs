@@ -4,7 +4,6 @@ using FinanceBot.Infrastructure.OpenAI;
 using FinanceBot.Infrastructure.Persistence;
 using FinanceBot.Infrastructure.Services;
 using FinanceBot.Infrastructure.Telegram;
-using FinanceBot.Worker.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
