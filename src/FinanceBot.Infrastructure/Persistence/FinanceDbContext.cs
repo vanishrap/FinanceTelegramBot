@@ -25,8 +25,8 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options)
         b.Entity<AiRun>().HasIndex(x => x.InputBatchId);
         b.Entity<AuditLog>().HasIndex(x => new { x.EntityType, x.EntityId });
         foreach (var type in b.Model.GetEntityTypes()) foreach (var property in type.GetProperties().Where(p => p.ClrType == typeof(decimal))) { property.SetPrecision(18); property.SetScale(4); }
-        b.Entity<Transaction>().Property(x => x.Type).HasConversion<string>(); b.Entity<Account>().Property(x => x.Type).HasConversion<string>(); b.Entity<Category>().Property(x => x.Type).HasConversion<string>();
-        b.Entity<InputBatch>().Property(x => x.Status).HasConversion<string>(); b.Entity<InputMessage>().Property(x => x.Type).HasConversion<string>(); b.Entity<Debt>().Property(x => x.Direction).HasConversion<string>(); b.Entity<Debt>().Property(x => x.Status).HasConversion<string>();
+        b.Entity<Transaction>().Property(x => x.Type).HasConversion(EnumStorage.TransactionTypeConverter); b.Entity<Account>().Property(x => x.Type).HasConversion<string>(); b.Entity<Category>().Property(x => x.Type).HasConversion(EnumStorage.CategoryTypeConverter);
+        b.Entity<InputBatch>().Property(x => x.Status).HasConversion<string>(); b.Entity<InputMessage>().Property(x => x.Type).HasConversion<string>(); b.Entity<Debt>().Property(x => x.Direction).HasConversion(EnumStorage.DebtDirectionConverter); b.Entity<Debt>().Property(x => x.Status).HasConversion<string>();
         b.Entity<AiRun>().Property(x => x.Status).HasConversion<string>(); b.Entity<ValidationResult>().Property(x => x.Status).HasConversion<string>();
         b.Entity<Account>().HasOne(x => x.OwnerUser).WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<Category>().HasOne(x => x.Parent).WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);

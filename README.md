@@ -58,6 +58,11 @@ together. AI answers are sent through `SendRichMessageAsync` and formatted as co
 Markdown, with headings, emphasis, lists, quotes, separators, and Markdown tables where they improve
 readability. If Telegram rejects malformed AI-generated Markdown, the bot retries as plain text so
 the answer is not lost.
+The analytics schema explicitly describes persisted enum values as SQLite text—for example,
+expenses are filtered with `Transactions.Type = 'Expense'`, not the in-memory enum ordinal `0`.
+The same canonical values are shared by EF write/read converters and the analytics prompt. A
+migration normalizes known legacy numeric or Russian values, preventing old data from silently
+disappearing from analytics results.
 
 ## Architecture
 

@@ -10,10 +10,28 @@ namespace FinanceBot.Tests;
 public sealed class OpenAiServicesTests
 {
     [Fact]
+    public async Task AnalyticsPlanAsync_TellsModelThatEnumsAreStoredAsText()
+    {
+        var response = """
+            {"output":[{"type":"message","content":[{"type":"output_text","text":"{\"isQuestion\":true,\"sql\":\"SELECT SUM(Amount) FROM Transactions WHERE CreatedByUserId=$userId AND Type='Expense'\",\"clarificationQuestion\":null}"}]}]}
+            """;
+        var handler = new JsonResponseHandler(response);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://api.openai.com/v1/") };
+        var service = new AiAnalyticsService(http, new FinanceOptions(), NullLogger<AiAnalyticsService>.Instance);
+
+        var plan = await service.PlanAsync(new AiInput(["Сколько я потратил?"], [], "{}"), CancellationToken.None);
+
+        Assert.True(plan.IsQuestion);
+        Assert.Contains("Type='Expense'", plan.Sql!);
+        Assert.Contains("Transactions.Type = 'Expense'", handler.RequestBody);
+        Assert.Contains("never compare Type, Direction, or Status with numeric enum values", handler.RequestBody);
+    }
+
+    [Fact]
     public async Task ExtractAsync_ReadsOutputTextAfterReasoningItem()
     {
         const string extracted = """
-            {"kind":"Expense","amount":345,"currency":"MYR","description":"Расход","merchant":null,"accountId":1,"toAccountId":null,"receipt":null,"categoryId":null,"transactionDate":null,"clarificationQuestion":null}
+            {"operations":[{"kind":"Expense","amount":345,"currency":"MYR","description":"Расход","merchant":null,"accountId":1,"toAccountId":null,"receipt":null,"categoryId":null,"transactionDate":null,"clarificationQuestion":null,"debtDirection":null,"counterparty":null}]}
             """;
         var response = $$"""
             {
@@ -57,10 +75,15 @@ public sealed class OpenAiServicesTests
 
     private sealed class JsonResponseHandler(string response) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        public string RequestBody { get; private set; } = "";
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestBody = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(response, Encoding.UTF8, "application/json")
-            });
+            };
+        }
     }
 }
