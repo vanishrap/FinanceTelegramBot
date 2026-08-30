@@ -39,7 +39,22 @@ They are collected into one batch until 60 seconds have passed without a new mes
 message resets that delay. If an account, category, date, or another material detail is missing or
 ambiguous, the bot asks a specific follow-up question and keeps the batch. The user's reply reopens
 that same batch, so the original messages and attachments remain available. An explicitly stated
-transaction date is stored; otherwise the first message timestamp is used.
+transaction date is stored; otherwise the current date and time in Malaysia (UTC+08:00) is used.
+
+The bot also records debts from natural language, including the amount, currency, counterparty, and
+direction. `Payable` means that the user owes the counterparty; `Receivable` means that the
+counterparty owes the user. If either party or the direction is unclear, the bot asks a follow-up
+question instead of guessing.
+
+Natural-language questions are handled as analytics instead of transactions. The AI can build a
+read-only query for arbitrary periods, merchants, categories, accounts, receipts, and combinations
+of them. The query is executed with the Telegram user's internal ID, strict read-only validation,
+a timeout, and a row cap. Its JSON result is then returned to the AI together with the original
+conversation so it can produce a readable Russian answer. Different currencies are never summed
+together. AI answers are sent through `SendRichMessageAsync` and formatted as concise Telegram Rich
+Markdown, with headings, emphasis, lists, quotes, separators, and Markdown tables where they improve
+readability. If Telegram rejects malformed AI-generated Markdown, the bot retries as plain text so
+the answer is not lost.
 
 ## Architecture
 
