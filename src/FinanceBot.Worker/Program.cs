@@ -4,6 +4,7 @@ using FinanceBot.Infrastructure.OpenAI;
 using FinanceBot.Infrastructure.Persistence;
 using FinanceBot.Infrastructure.Services;
 using FinanceBot.Infrastructure.Telegram;
+using FinanceBot.Worker.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -19,7 +20,16 @@ var options=new FinanceOptions { TelegramBotToken=Required(builder.Configuration
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.DatabasePath))!);
 builder.Services.AddSingleton(options);
 builder.Services.AddPooledDbContextFactory<FinanceDbContext>(x=>x.UseSqlite($"Data Source={options.DatabasePath};Foreign Keys=True;Default Timeout=30"));
-builder.Services.AddHttpClient<ITelegramClient,TelegramHttpClient>(x=>x.BaseAddress=new("https://api.telegram.org/")).AddStandardResilienceHandler();
+builder.Services.AddHttpClient<ITelegramClient,TelegramHttpClient>(x=>x.BaseAddress=new("https://api.telegram.org/")).AddStandardResilienceHandler(resilience=>
+{
+    // Telegram long polling waits up to 25 seconds. The standard 10-second attempt
+    // timeout would cancel healthy getUpdates requests before Telegram can answer.
+    resilience.AttemptTimeout.Timeout=TimeSpan.FromSeconds(40);
+    // The circuit-breaker sampling window must be at least twice the attempt
+    // timeout; the standard 30-second window is invalid with the timeout above.
+    resilience.CircuitBreaker.SamplingDuration=TimeSpan.FromSeconds(90);
+    resilience.TotalRequestTimeout.Timeout=TimeSpan.FromMinutes(2);
+});
 builder.Services.AddHttpClient<IVoiceTranscriptionService,VoiceTranscriptionService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler();
 builder.Services.AddHttpClient<IAiExtractionService,AiExtractionService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler();
 builder.Services.AddSingleton<MessageBatchService>();builder.Services.AddSingleton<BatchProcessor>();builder.Services.AddHostedService<PollingWorker>();
