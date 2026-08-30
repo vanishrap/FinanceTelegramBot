@@ -15,12 +15,13 @@ public sealed class FinanceDbContext(DbContextOptions<FinanceDbContext> options)
         b.Entity<Category>().HasIndex(x => new { x.ParentId, x.Name, x.Type }).IsUnique();
         b.Entity<InputMessage>().HasIndex(x => x.TelegramMessageId).IsUnique();
         b.Entity<InputBatch>().HasIndex(x => new { x.Status, x.LastMessageAt });
-        b.Entity<Transaction>().HasIndex(x => x.InputBatchId).IsUnique();
+        b.Entity<Transaction>().HasIndex(x => new { x.InputBatchId, x.InputBatchOperationIndex }).IsUnique();
         b.Entity<AccountMovement>().HasIndex(x => new { x.AccountId, x.TransactionId });
         b.Entity<Receipt>().HasIndex(x => x.TransactionId).IsUnique();
         b.Entity<ExchangeDetail>().HasKey(x => x.TransactionId);
         b.Entity<ExchangeDetail>().HasOne(x => x.Transaction).WithOne().HasForeignKey<ExchangeDetail>(x => x.TransactionId);
         b.Entity<DebtPayment>().HasIndex(x => new { x.DebtId, x.PaidAt });
+        b.Entity<Debt>().HasIndex(x => new { x.InputBatchId, x.InputBatchOperationIndex }).IsUnique();
         b.Entity<AiRun>().HasIndex(x => x.InputBatchId);
         b.Entity<AuditLog>().HasIndex(x => new { x.EntityType, x.EntityId });
         foreach (var type in b.Model.GetEntityTypes()) foreach (var property in type.GetProperties().Where(p => p.ClrType == typeof(decimal))) { property.SetPrecision(18); property.SetScale(4); }
