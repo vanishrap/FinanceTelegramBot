@@ -195,6 +195,60 @@ public sealed class BatchProcessorTests
         }
     }
 
+    [Fact]
+    public async Task ProcessDueAsync_CorrectsOwnedTransactionAndWritesAuditLog()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-correction-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            var (accountId, categoryId) = await SeedAsync(factory);
+            long transactionId;
+            await using (var db = factory.CreateDbContext())
+            {
+                var userId = (await db.Users.SingleAsync()).Id;
+                var transaction = new Transaction { CreatedByUserId = userId, Type = TransactionType.Expense, TransactionDate = DateTimeOffset.UtcNow, CurrencyCode = "MYR", Amount = 34, Description = "Kiku Zakura", MerchantName = "Kiku Zakura", CategoryId = categoryId, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow, Movements = [new AccountMovement { AccountId = accountId, Amount = -34 }] };
+                db.Transactions.Add(transaction); await db.SaveChangesAsync(); transactionId = transaction.Id;
+            }
+            var telegram = new RecordingTelegramClient();
+            var extraction = new StubExtractionService($$"""
+                {"kind":"Correction","amount":340,"currency":"MYR","description":"Kiku Zakura","merchant":"Kiku Zakura","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{categoryId}},"transactionDate":null,"clarificationQuestion":null,"debtDirection":null,"counterparty":null,"targetTransactionId":{{transactionId}}}
+                """);
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(), new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            await using var resultDb = factory.CreateDbContext();
+            var corrected = await resultDb.Transactions.Include(x => x.Movements).SingleAsync();
+            Assert.Equal(340m, corrected.Amount); Assert.Equal(-340m, Assert.Single(corrected.Movements).Amount);
+            var audit = await resultDb.AuditLog.SingleAsync(); Assert.Equal("Update", audit.Action); Assert.Contains("\"amount\":34", audit.OldJson, StringComparison.OrdinalIgnoreCase); Assert.Contains("\"amount\":340", audit.NewJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains($"ID {transactionId} исправлена", Assert.Single(telegram.SentMessages));
+        }
+        finally { File.Delete(databasePath); }
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_DeleteRequiresOneExactOwnedId()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-delete-guard-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath); await SeedAsync(factory);
+            var telegram = new RecordingTelegramClient();
+            var extraction = new StubExtractionService("""
+                {"kind":"Delete","amount":0,"currency":"MYR","description":"Все расходы","merchant":null,"accountId":null,"toAccountId":null,"receipt":null,"categoryId":null,"transactionDate":null,"clarificationQuestion":null,"debtDirection":null,"counterparty":null,"targetTransactionId":null}
+                """);
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(), new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            await using var resultDb = factory.CreateDbContext();
+            Assert.Empty(await resultDb.AuditLog.ToListAsync());
+            Assert.Contains("точный ID одной операции", Assert.Single(telegram.SentMessages));
+        }
+        finally { File.Delete(databasePath); }
+    }
+
     private static async Task<(long AccountId, long CategoryId)> SeedAsync(IDbContextFactory<FinanceDbContext> factory)
     {
         await using var db = await factory.CreateDbContextAsync();
