@@ -32,6 +32,8 @@ builder.Services.AddHttpClient<ITelegramClient,TelegramHttpClient>(x=>x.BaseAddr
 });
 builder.Services.AddHttpClient<IVoiceTranscriptionService,VoiceTranscriptionService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler();
 builder.Services.AddHttpClient<IAiExtractionService,AiExtractionService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler();
+builder.Services.AddHttpClient<IAiAnalyticsService,AiAnalyticsService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler();
+builder.Services.AddSingleton<IAnalyticsQueryExecutor,AnalyticsQueryExecutor>();
 builder.Services.AddSingleton<MessageBatchService>();builder.Services.AddSingleton<AccountCommandService>();builder.Services.AddSingleton<BatchProcessor>();builder.Services.AddHostedService<PollingWorker>();builder.Services.AddHostedService<BatchProcessingWorker>();
 var host=builder.Build();
 await using(var scope=host.Services.CreateAsyncScope()){var factory=scope.ServiceProvider.GetRequiredService<IDbContextFactory<FinanceDbContext>>();await using var db=await factory.CreateDbContextAsync();await db.Database.MigrateAsync();}
