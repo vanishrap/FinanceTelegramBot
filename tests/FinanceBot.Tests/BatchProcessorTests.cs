@@ -11,6 +11,94 @@ namespace FinanceBot.Tests;
 public sealed class BatchProcessorTests
 {
     [Fact]
+    public async Task ProcessDueAsync_RecordsMultipleExpensesFromOneMessage()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-multiple-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            var (accountId, taxiCategoryId) = await SeedAsync(factory);
+            long restaurantCategoryId;
+            await using (var db = factory.CreateDbContext()) restaurantCategoryId = (await db.Categories.SingleAsync(x => x.Name == "Рестораны и кафе")).Id;
+            var telegram = new RecordingTelegramClient();
+            var extraction = new StubExtractionService($$"""
+                {"operations":[
+                  {"kind":"Expense","amount":35,"currency":"MYR","description":"Поездка на такси","merchant":"Такси","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{taxiCategoryId}},"transactionDate":null,"clarificationQuestion":null,"debtDirection":null,"counterparty":null},
+                  {"kind":"Expense","amount":19,"currency":"MYR","description":"Еда в ресторане","merchant":"Dodo Korea","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{restaurantCategoryId}},"transactionDate":null,"clarificationQuestion":null,"debtDirection":null,"counterparty":null}
+                ]}
+                """);
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
+                new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            await using var resultDb = factory.CreateDbContext();
+            var transactions = await resultDb.Transactions.OrderBy(x => x.Amount).ToListAsync();
+            Assert.Equal(2, transactions.Count);
+            Assert.Equal(new[] { 19m, 35m }, transactions.Select(x => x.Amount));
+            Assert.All(transactions, x => Assert.NotNull(x.InputBatchId));
+            var reply = Assert.Single(telegram.SentMessages);
+            Assert.Contains("Записано операций: 2", reply);
+            Assert.Contains("Dodo Korea", reply);
+        }
+        finally { File.Delete(databasePath); }
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_UsesCurrentMalaysiaTime_WhenTransactionDateIsMissing()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-malaysia-time-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            var (accountId, categoryId) = await SeedAsync(factory);
+            var before = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(8));
+            var extraction = new StubExtractionService($$"""
+                {"kind":"Expense","amount":25.50,"currency":"MYR","description":"Поездка домой","merchant":"Такси","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{categoryId}},"transactionDate":null,"clarificationQuestion":null}
+                """);
+            var processor = new BatchProcessor(factory, new RecordingTelegramClient(), new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
+                new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            await using var db = factory.CreateDbContext();
+            var transaction = await db.Transactions.SingleAsync();
+            var after = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(8));
+            Assert.Equal(TimeSpan.FromHours(8), transaction.TransactionDate.Offset);
+            Assert.InRange(transaction.TransactionDate, before, after);
+        }
+        finally { File.Delete(databasePath); }
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_RecordsWhoOwesWhom()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-debt-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            await SeedAsync(factory);
+            var telegram = new RecordingTelegramClient();
+            var extraction = new StubExtractionService("""
+                {"kind":"DebtCreate","amount":300,"currency":"MYR","description":"Одолжил на ремонт","merchant":null,"accountId":null,"toAccountId":null,"receipt":null,"categoryId":null,"transactionDate":null,"clarificationQuestion":null,"debtDirection":"Receivable","counterparty":"Иван"}
+                """);
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
+                new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            await using var db = factory.CreateDbContext();
+            var debt = await db.Debts.SingleAsync();
+            Assert.Equal(DebtDirection.Receivable, debt.Direction);
+            Assert.Equal("Иван", debt.Counterparty);
+            Assert.Equal(300m, debt.OriginalAmount);
+            Assert.NotNull(debt.InputBatchId);
+            Assert.Contains("Вам должен", Assert.Single(telegram.SentMessages));
+        }
+        finally { File.Delete(databasePath); }
+    }
+
+    [Fact]
     public async Task ProcessDueAsync_AsksWhatExpenseWasFor_WhenOnlyAmountWasProvided()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"finance-purpose-{Guid.NewGuid():N}.db");
@@ -22,7 +110,7 @@ public sealed class BatchProcessorTests
             var extraction = new StubExtractionService($$"""
                 {"kind":"Expense","amount":457,"currency":"MYR","description":"Расход","merchant":null,"accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":null,"transactionDate":null,"clarificationQuestion":null}
                 """);
-            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
                 new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
 
             await processor.ProcessDueAsync(CancellationToken.None);
@@ -52,7 +140,7 @@ public sealed class BatchProcessorTests
             var extraction = new StubExtractionService($$"""
                 {"kind":"Expense","amount":48,"currency":"MYR","description":"Поездка Grab","merchant":"Grab","accountId":null,"toAccountId":null,"receipt":null,"categoryId":{{categoryId}}}
                 """);
-            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
                 new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
 
             await processor.ProcessDueAsync(CancellationToken.None);
@@ -84,7 +172,7 @@ public sealed class BatchProcessorTests
             var extraction = new StubExtractionService($$"""
                 {"kind":"Expense","amount":25.50,"currency":"MYR","description":"Поездка домой","merchant":"Такси","accountId":{{accountId}},"toAccountId":null,"receipt":null,"categoryId":{{categoryId}},"transactionDate":"{{transactionDate:O}}","clarificationQuestion":null}
                 """);
-            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction,
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(),
                 new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
 
             await processor.ProcessDueAsync(CancellationToken.None);
@@ -138,12 +226,24 @@ public sealed class BatchProcessorTests
         public List<string> SentMessages { get; } = [];
         public Task<IReadOnlyList<TelegramUpdate>> GetUpdatesAsync(long offset, CancellationToken ct) => Task.FromResult<IReadOnlyList<TelegramUpdate>>([]);
         public Task<TelegramFile> DownloadAsync(string fileId, CancellationToken ct) => throw new NotSupportedException();
-        public Task SendAsync(long chatId, string text, CancellationToken ct) { SentMessages.Add(text); return Task.CompletedTask; }
+        public Task SendRichMessageAsync(long chatId, string text, CancellationToken ct) { SentMessages.Add(text); return Task.CompletedTask; }
     }
 
     private sealed class StubExtractionService(string output) : IAiExtractionService
     {
         public Task<string> ExtractAsync(AiInput input, CancellationToken ct) => Task.FromResult(output);
+    }
+
+
+    private sealed class StubAnalyticsService : IAiAnalyticsService
+    {
+        public Task<AnalyticsPlan> PlanAsync(AiInput input, CancellationToken ct) => Task.FromResult(new AnalyticsPlan(false, null, null));
+        public Task<string> AnswerAsync(AiInput input, AnalyticsPlan plan, string queryResultsJson, CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    private sealed class StubQueryExecutor : IAnalyticsQueryExecutor
+    {
+        public Task<string> ExecuteAsync(string sql, long userId, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class StubTranscriptionService : IVoiceTranscriptionService

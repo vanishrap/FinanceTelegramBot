@@ -24,5 +24,24 @@ public sealed class TelegramHttpClient(HttpClient http, FinanceOptions options) 
         var metadata = await http.GetFromJsonAsync<JsonElement>(Url($"getFile?file_id={Uri.EscapeDataString(fileId)}"), ct); var path = metadata.GetProperty("result").GetProperty("file_path").GetString()!;
         var bytes = await http.GetByteArrayAsync($"/file/bot{options.TelegramBotToken}/{path}", ct); return new(bytes, Path.GetFileName(path), path.EndsWith(".oga", StringComparison.OrdinalIgnoreCase) ? "audio/ogg" : "image/jpeg");
     }
-    public async Task SendAsync(long chatId, string text, CancellationToken ct) { using var response = await http.PostAsJsonAsync(Url("sendMessage"), new { chat_id = chatId, text }, ct); response.EnsureSuccessStatusCode(); }
+    public async Task SendRichMessageAsync(long chatId, string text, CancellationToken ct)
+    {
+        // Telegram exposes rich text through sendMessage + parse_mode. Keep the
+        // richer Markdown source intact: unsupported constructs such as headings
+        // and tables remain readable plain text, while emphasis is rendered.
+        using var response = await http.PostAsJsonAsync(Url("sendMessage"), new
+        {
+            chat_id = chatId,
+            text,
+            parse_mode = "Markdown",
+            disable_web_page_preview = true
+        }, ct);
+        if (response.IsSuccessStatusCode) return;
+        if (response.StatusCode != System.Net.HttpStatusCode.BadRequest) response.EnsureSuccessStatusCode();
+
+        // AI output can occasionally contain malformed Markdown. Never lose the
+        // financial answer because of a Telegram entity parsing error.
+        using var fallback = await http.PostAsJsonAsync(Url("sendMessage"), new { chat_id = chatId, text }, ct);
+        fallback.EnsureSuccessStatusCode();
+    }
 }
