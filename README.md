@@ -28,6 +28,14 @@ On Railway, mount a volume at `/data` and configure the variables from `.env.exa
 Only Telegram users listed in `ALLOWED_TELEGRAM_USER_IDS` are accepted; all other updates are
 acknowledged without being persisted.
 
+## Telegram commands
+
+* `/account <name> <currency> <cash|bank|other>` creates a personal account. The name may contain spaces, for example `/account Main card MYR bank`.
+* `/accounts` lists personal accounts and their current ledger balances.
+* `/help` shows the available commands in Telegram.
+
+Messages that are not commands continue through the normal AI transaction extraction flow.
+
 ## Architecture
 
 * `FinanceBot.Domain` contains the ledger, receipt, debt, input and audit model.
