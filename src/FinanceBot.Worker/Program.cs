@@ -8,6 +8,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 var builder=Host.CreateApplicationBuilder(args);
+// `dotnet run` does not load .env files by itself. Load it for local development,
+// then re-add process variables so Docker/Railway configuration has precedence.
+builder.Configuration.AddInMemoryCollection(DotEnv.LoadNearest(Directory.GetCurrentDirectory(), AppContext.BaseDirectory));
 builder.Configuration.AddEnvironmentVariables();
 static string Required(IConfiguration c,string name) => c[name] ?? throw new InvalidOperationException($"{name} is required.");
 static string Value(IConfiguration c,string name,string fallback) => c[name] ?? c[$"Finance:{name}"] ?? fallback;

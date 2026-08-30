@@ -5,6 +5,19 @@ then transcribed/extracted with OpenAI and committed only after deterministic va
 
 ## Run locally
 
+The worker searches the current directory and its parents for `.env`, so direct CLI and IDE runs
+both work. Process environment variables (including Railway variables) take precedence.
+
+### With .NET 8 SDK
+
+```bash
+cp .env.example .env
+dotnet restore FinanceBot.sln
+dotnet run --project src/FinanceBot.Worker/FinanceBot.Worker.csproj
+```
+
+### With Docker
+
 ```bash
 cp .env.example .env
 docker build -t finance-bot .
