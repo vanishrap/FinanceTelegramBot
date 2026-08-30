@@ -10,8 +10,11 @@ public sealed class BatchProcessor(IDbContextFactory<FinanceDbContext> factory, 
  private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
  public async Task ProcessDueAsync(CancellationToken ct)
  {
-  await using var db=await factory.CreateDbContextAsync(ct); var cutoff=DateTimeOffset.UtcNow.AddSeconds(-options.MessageBatchDelaySeconds);
-  var ids=await db.InputBatches.Where(x=>(x.Status==BatchStatus.Collecting && x.LastMessageAt<=cutoff)||(x.Status==BatchStatus.Processing && x.ProcessingStartedAt<DateTimeOffset.UtcNow.AddMinutes(-15))).Select(x=>x.Id).Take(10).ToListAsync(ct);
+  await using var db=await factory.CreateDbContextAsync(ct); var now=DateTimeOffset.UtcNow; var cutoff=now.AddSeconds(-options.MessageBatchDelaySeconds); var abandonedBefore=now.AddMinutes(-15);
+  // SQLite cannot translate DateTimeOffset range comparisons. Filter by status in
+  // SQL, then apply the timestamp checks to the small candidate set in memory.
+  var candidates=await db.InputBatches.Where(x=>x.Status==BatchStatus.Collecting||x.Status==BatchStatus.Processing).ToListAsync(ct);
+  var ids=candidates.Where(x=>(x.Status==BatchStatus.Collecting && x.LastMessageAt<=cutoff)||(x.Status==BatchStatus.Processing && x.ProcessingStartedAt<abandonedBefore)).Select(x=>x.Id).Take(10).ToList();
   foreach(var id in ids) await ProcessAsync(id,ct);
  }
  private async Task ProcessAsync(long id,CancellationToken ct)
