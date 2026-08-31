@@ -13,8 +13,8 @@ public sealed record FinanceOptions
     public string DatabasePath { get; init; } = "/data/finance.db";
     public string DefaultCurrency { get; init; } = "MYR";
     public decimal ValidationRoundingTolerance { get; init; } = .05m;
-    public int OpenAiAttemptTimeoutSeconds { get; init; } = 300;
-    public int OpenAiTotalTimeoutSeconds { get; init; } = 1200;
+    public int OpenAiAttemptTimeoutSeconds { get; init; } = 280;
+    public int OpenAiTotalTimeoutSeconds { get; init; } = 300;
 }
 public sealed record TelegramUpdate(long UpdateId, long MessageId, long UserId, string UserName, string? Text, string? PhotoFileId, string? VoiceFileId);
 public sealed record TelegramFile(byte[] Content, string FileName, string ContentType);
