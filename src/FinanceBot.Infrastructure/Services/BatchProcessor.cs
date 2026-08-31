@@ -15,6 +15,10 @@ public sealed class BatchProcessor(IDbContextFactory<FinanceDbContext> factory, 
   "расход", "трата", "покупка", "expense", "spending", "purchase",
   "доход", "поступление", "income", "transaction", "транзакция", "операция"
  };
+ private static readonly HashSet<string> AutoCorrectableReceiptChecks = new(StringComparer.Ordinal)
+ {
+  "ReceiptTotal", "ItemsTotal", "TransactionTotal", "ReceiptItemCategory"
+ };
  public async Task ProcessDueAsync(CancellationToken ct)
  {
   await using var db=await factory.CreateDbContextAsync(ct); var now=DateTimeOffset.UtcNow; var cutoff=now.AddSeconds(-options.MessageBatchDelaySeconds); var abandonedBefore=now-TimeSpan.FromSeconds((options.OpenAiTotalTimeoutSeconds*2L)+300);
@@ -47,6 +51,13 @@ public sealed class BatchProcessor(IDbContextFactory<FinanceDbContext> factory, 
    {
     if(string.IsNullOrWhiteSpace(plan.Sql)){batch.Status=BatchStatus.NeedsReview;run.Status=RunStatus.Completed;run.OutputJson=JsonSerializer.Serialize(plan);run.CompletedAt=DateTimeOffset.UtcNow;await db.SaveChangesAsync(ct);await NotifyAsync(batch.User.TelegramUserId,plan.ClarificationQuestion??"Уточните, пожалуйста, какой финансовый показатель и период нужно проанализировать.",ct);return;}
     var results=await queryExecutor.ExecuteAsync(plan.Sql,batch.UserId,ct);
+    if(recentTransactions.Count>0&&QueryLooksEmpty(results))
+    {
+     var queryFeedback=JsonSerializer.Serialize(new{instruction="The SQL returned no financial data even though recentTransactions contains user transactions. Correct enum casing, Malaysia date boundaries, joins, and user scoping. Return a complete replacement analytics plan.",failedSql=plan.Sql,queryResult=JsonSerializer.Deserialize<JsonElement>(results,JsonOptions)},JsonOptions);
+     logger.LogWarning("Automatically replanning empty analytics query for InputBatchId={InputBatchId}: {Feedback}",id,queryFeedback);
+     var revisedPlan=await analytics.PlanAsync(new AiInput([..texts,$"[AUTOMATIC QUERY FEEDBACK] {queryFeedback}"],images,context),ct);
+     if(revisedPlan.IsQuestion&&!string.IsNullOrWhiteSpace(revisedPlan.Sql)){plan=revisedPlan;results=await queryExecutor.ExecuteAsync(plan.Sql,batch.UserId,ct);}
+    }
     var answer=await analytics.AnswerAsync(aiInput,plan,results,ct);
     run.OutputJson=JsonSerializer.Serialize(new{plan,results,answer});run.Status=RunStatus.Completed;run.CompletedAt=DateTimeOffset.UtcNow;batch.Status=BatchStatus.Completed;batch.CompletedAt=DateTimeOffset.UtcNow;await db.SaveChangesAsync(ct);await NotifyAsync(batch.User.TelegramUserId,answer,ct);return;
    }

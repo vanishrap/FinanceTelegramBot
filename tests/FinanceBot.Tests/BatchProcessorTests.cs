@@ -71,6 +71,72 @@ public sealed class BatchProcessorTests
     }
 
     [Fact]
+    public async Task ProcessDueAsync_AutomaticallyCorrectsReceiptArithmeticWithOriginalContext()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-receipt-retry-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            var (accountId, categoryId) = await SeedAsync(factory);
+            long shoppingCategoryId;
+            await using (var db = factory.CreateDbContext()) shoppingCategoryId = (await db.Categories.SingleAsync(x => x.Name == "Покупки")).Id;
+            string Output(decimal tax, long itemCategoryId) => $$"""
+                {"kind":"Expense","amount":12,"currency":"MYR","description":"Обед","merchant":"Cafe","accountId":{{accountId}},"toAccountId":null,"receipt":{"subtotal":10,"tax":{{tax}},"serviceCharge":0,"discount":0,"rounding":0,"total":12,"items":[{"name":"Обед","quantity":1,"unitPrice":12,"baseAmount":10,"discount":0,"taxAllocated":{{tax}},"serviceChargeAllocated":0,"finalAmount":12,"categoryId":{{itemCategoryId}},"confidence":0.9}]},"categoryId":{{categoryId}},"transactionDate":null,"clarificationQuestion":null,"debtDirection":null,"counterparty":null,"targetTransactionId":null,"targetDebtId":null}
+                """;
+            var extraction = new SequencedExtractionService(Output(1, shoppingCategoryId), Output(2, categoryId));
+            var processor = new BatchProcessor(factory, new RecordingTelegramClient(), new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(), new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            await using var db = factory.CreateDbContext();
+            Assert.Equal(12m, (await db.Transactions.SingleAsync()).Amount);
+            Assert.Equal(2, extraction.Inputs.Count);
+            Assert.Contains("Такси 25.50", extraction.Inputs[1].Texts[0]);
+            Assert.Contains("AUTOMATIC VALIDATION FEEDBACK", extraction.Inputs[1].Texts[^1]);
+            Assert.Contains("ReceiptTotal", extraction.Inputs[1].Texts[^1]);
+            Assert.Contains("ReceiptItemCategory", extraction.Inputs[1].Texts[^1]);
+            Assert.Single(await db.ValidationResults.Where(x => x.Type == "ReceiptTotal").ToListAsync());
+            Assert.Equal(ValidationStatus.Pass, (await db.ValidationResults.SingleAsync(x => x.Type == "ReceiptTotal")).Status);
+        }
+        finally { File.Delete(databasePath); }
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_ReplansEmptyAnalyticsQuery_WhenRecentTransactionsExist()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-analytics-replan-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            await SeedAsync(factory);
+            await using (var db = factory.CreateDbContext())
+            {
+                var userId = (await db.Users.SingleAsync()).Id;
+                var transaction = new Transaction { CreatedByUserId = userId, Type = TransactionType.Expense, TransactionDate = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(8)), CurrencyCode = "MYR", Amount = 130.50m, Description = "Mercato", CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow };
+                db.Receipts.Add(new Receipt { Transaction=transaction,MerchantName="Mercato",ReceiptDate=transaction.TransactionDate,Subtotal=130.50m,Total=130.50m,CurrencyCode="MYR",Items=[new ReceiptItem{RawName="Milk",NormalizedName="Milk",Quantity=1,UnitPrice=130.50m,BaseAmount=130.50m,FinalAmount=130.50m,AiConfidence=1}] });
+                await db.SaveChangesAsync();
+            }
+            var analytics = new SequencedAnalyticsService(
+                new AnalyticsPlan(true, "SELECT SUM(Amount) AS TotalAmount, COUNT(*) AS OperationCount FROM Transactions WHERE CreatedByUserId=$userId AND Type='expense'", null),
+                new AnalyticsPlan(true, "SELECT SUM(Amount) AS TotalAmount, COUNT(*) AS OperationCount FROM Transactions WHERE CreatedByUserId=$userId AND Type='Expense'", null));
+            var telegram = new RecordingTelegramClient();
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), new StubExtractionService("{}"), analytics, new AnalyticsQueryExecutor(factory), new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            Assert.Equal(2, analytics.PlanInputs.Count);
+            Assert.Contains("recentReceipts", analytics.PlanInputs[0].ContextJson);
+            Assert.Contains("recentReceiptItems", analytics.PlanInputs[0].ContextJson);
+            Assert.Contains("Milk", analytics.PlanInputs[0].ContextJson);
+            Assert.Contains("AUTOMATIC QUERY FEEDBACK", analytics.PlanInputs[1].Texts[^1]);
+            var answer = Assert.Single(telegram.SentMessages);
+            Assert.Contains("130.5", answer);
+            Assert.Contains("OperationCount", answer);
+        }
+        finally { File.Delete(databasePath); }
+    }
+
+    [Fact]
     public async Task ProcessDueAsync_RecordsWhoOwesWhom()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"finance-debt-{Guid.NewGuid():N}.db");
@@ -324,11 +390,30 @@ public sealed class BatchProcessorTests
         public Task<string> ExtractAsync(AiInput input, CancellationToken ct) => Task.FromResult(output);
     }
 
+    private sealed class SequencedExtractionService(params string[] outputs) : IAiExtractionService
+    {
+        private int index;
+        public List<AiInput> Inputs { get; } = [];
+        public Task<string> ExtractAsync(AiInput input, CancellationToken ct)
+        {
+            Inputs.Add(input);
+            return Task.FromResult(outputs[index++]);
+        }
+    }
+
 
     private sealed class StubAnalyticsService : IAiAnalyticsService
     {
         public Task<AnalyticsPlan> PlanAsync(AiInput input, CancellationToken ct) => Task.FromResult(new AnalyticsPlan(false, null, null));
         public Task<string> AnswerAsync(AiInput input, AnalyticsPlan plan, string queryResultsJson, CancellationToken ct) => throw new NotSupportedException();
+    }
+
+    private sealed class SequencedAnalyticsService(params AnalyticsPlan[] plans) : IAiAnalyticsService
+    {
+        private int index;
+        public List<AiInput> PlanInputs { get; } = [];
+        public Task<AnalyticsPlan> PlanAsync(AiInput input, CancellationToken ct) { PlanInputs.Add(input); return Task.FromResult(plans[index++]); }
+        public Task<string> AnswerAsync(AiInput input, AnalyticsPlan plan, string queryResultsJson, CancellationToken ct) => Task.FromResult(queryResultsJson);
     }
 
     private sealed class StubQueryExecutor : IAnalyticsQueryExecutor
