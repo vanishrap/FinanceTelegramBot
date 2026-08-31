@@ -27,7 +27,7 @@ public interface IAiAnalyticsService
     Task<string> AnswerAsync(AiInput input, AnalyticsPlan plan, string queryResultsJson, CancellationToken ct);
 }
 public sealed record AnalyticsPlan(bool IsQuestion, string? Sql, string? ClarificationQuestion);
-public interface IAnalyticsQueryExecutor { Task<string> ExecuteAsync(string sql, long userId, CancellationToken ct); }
+public interface IAnalyticsQueryExecutor { Task<string> ExecuteAsync(string sql, CancellationToken ct); }
 public sealed record AiInput(IReadOnlyList<string> Texts, IReadOnlyList<string> ImageDataUrls, string ContextJson);
 public sealed record ExtractedOperation(string Kind, decimal Amount, string Currency, string Description, string? Merchant, long? AccountId, long? ToAccountId, ReceiptDraft? Receipt, long? CategoryId = null, DateTimeOffset? TransactionDate = null, string? ClarificationQuestion = null, string? DebtDirection = null, string? Counterparty = null, long? TargetTransactionId = null, long? TargetDebtId = null);
 public sealed record ExtractedOperations(IReadOnlyList<ExtractedOperation> Operations);

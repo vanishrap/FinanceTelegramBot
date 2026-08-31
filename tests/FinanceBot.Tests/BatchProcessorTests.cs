@@ -117,8 +117,8 @@ public sealed class BatchProcessorTests
                 await db.SaveChangesAsync();
             }
             var analytics = new SequencedAnalyticsService(
-                new AnalyticsPlan(true, "SELECT SUM(Amount) AS TotalAmount, COUNT(*) AS OperationCount FROM Transactions WHERE CreatedByUserId=$userId AND Type='expense'", null),
-                new AnalyticsPlan(true, "SELECT SUM(Amount) AS TotalAmount, COUNT(*) AS OperationCount FROM Transactions WHERE CreatedByUserId=$userId AND Type='Expense'", null));
+                new AnalyticsPlan(true, "SELECT SUM(Amount) AS TotalAmount, COUNT(*) AS OperationCount FROM Transactions WHERE Type='expense'", null),
+                new AnalyticsPlan(true, "SELECT SUM(Amount) AS TotalAmount, COUNT(*) AS OperationCount FROM Transactions WHERE Type='Expense'", null));
             var telegram = new RecordingTelegramClient();
             var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), new StubExtractionService("{}"), analytics, new AnalyticsQueryExecutor(factory), new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
 
@@ -446,7 +446,7 @@ public sealed class BatchProcessorTests
 
     private sealed class StubQueryExecutor : IAnalyticsQueryExecutor
     {
-        public Task<string> ExecuteAsync(string sql, long userId, CancellationToken ct) => throw new NotSupportedException();
+        public Task<string> ExecuteAsync(string sql, CancellationToken ct) => throw new NotSupportedException();
     }
 
     private sealed class StubTranscriptionService : IVoiceTranscriptionService

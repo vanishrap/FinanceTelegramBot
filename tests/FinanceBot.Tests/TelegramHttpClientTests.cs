@@ -40,7 +40,22 @@ public sealed class TelegramHttpClientTests
         Assert.True(body.RootElement.GetProperty("disable_web_page_preview").GetBoolean());
     }
 
-    private sealed class RecordingHandler(string responseContent) : HttpMessageHandler
+    [Fact]
+    public async Task GetUpdatesAsync_MapsConflictToPollingConflictException()
+    {
+        var handler = new RecordingHandler(
+            "{\"ok\":false,\"error_code\":409,\"description\":\"Conflict: terminated by other getUpdates request\"}",
+            HttpStatusCode.Conflict);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://api.telegram.org/") };
+        var client = new TelegramHttpClient(http, new FinanceOptions { TelegramBotToken = "123456:secret" });
+
+        var exception = await Assert.ThrowsAsync<TelegramPollingConflictException>(
+            () => client.GetUpdatesAsync(0, CancellationToken.None));
+
+        Assert.Equal("Conflict: terminated by other getUpdates request", exception.Message);
+    }
+
+    private sealed class RecordingHandler(string responseContent, HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler
     {
         public Uri? RequestUri { get; private set; }
         public string? RequestBody { get; private set; }
@@ -49,7 +64,7 @@ public sealed class TelegramHttpClientTests
         {
             RequestUri = request.RequestUri;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            return new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(responseContent)
             };

@@ -51,7 +51,9 @@ Routine Telegram HTTP logs are suppressed because their request URLs contain the
 JSON payloads in diagnostic logs preserve Unicode characters instead of rendering them as
 `\uXXXX` escape sequences.
 Only Telegram users listed in `ALLOWED_TELEGRAM_USER_IDS` are accepted; all other updates are
-acknowledged without being persisted.
+acknowledged without being persisted. Authorized users share one family ledger: transactions,
+debts, receipts, analytics, and all bank/cash accounts are available from every allowed Telegram
+account. The user attached to a transaction records who entered it, not access ownership.
 OpenAI calls allow up to five minutes for an AI request by default, so large
 receipts are not aborted by the standard HTTP handler's ten-second timeout. Override these limits
 with `OPENAI_ATTEMPT_TIMEOUT_SECONDS` and `OPENAI_TOTAL_TIMEOUT_SECONDS` when necessary; the total
@@ -59,8 +61,8 @@ must be greater than the per-attempt timeout.
 
 ## Telegram commands
 
-* `/account <name> <currency> <cash|bank|other>` creates a personal account. The name may contain spaces, for example `/account Main card MYR bank`.
-* `/accounts` lists personal accounts and their current ledger balances.
+* `/account <name> <currency> <cash|bank|other>` creates a shared family account. The name may contain spaces, for example `/account Main card MYR bank`.
+* `/accounts` lists all shared accounts and their current ledger balances.
 * `/help` shows the available commands in Telegram.
 
 Messages that are not commands continue through the normal AI transaction extraction flow.
@@ -84,7 +86,7 @@ spending, and common income sources such as dividends, rent, bonuses, and insura
 
 Existing transactions can also be corrected or deleted in natural language. Corrections use the
 transaction ID shown in the recording confirmation and retain unchanged fields from recent history.
-Deletion is deliberately limited to one exact, user-owned transaction ID per request: broad filters
+Deletion is deliberately limited to one exact transaction ID per request: broad filters
 and AI-generated delete queries are never executed. Every correction and deletion is recorded in
 the audit log with the previous value.
 
@@ -92,22 +94,22 @@ An open payable debt can be reclassified as an expense by its debt ID. The bot c
 amount, currency, description, and date, then cancels the original debt so it is not counted twice.
 
 The bot also records debts from natural language, including the amount, currency, counterparty, and
-direction. `Payable` means that the user owes the counterparty; `Receivable` means that the
-counterparty owes the user. If either party or the direction is unclear, the bot asks a follow-up
+direction. `Payable` means that the family owes the counterparty; `Receivable` means that the
+counterparty owes the family. If either party or the direction is unclear, the bot asks a follow-up
 question instead of guessing.
 
 Natural-language questions are handled as analytics instead of transactions. The AI can build a
 read-only query for arbitrary periods, merchants, categories, accounts, receipts, and combinations
-of them. The query is executed with the Telegram user's internal ID, strict read-only validation,
-a timeout, and a row cap. Its JSON result is then returned to the AI together with the original
+of them. The query is executed against the complete shared family dataset with strict read-only
+validation, a timeout, and a row cap. Its JSON result is then returned to the AI together with the original
 conversation so it can produce a readable Russian answer. Different currencies are never summed
 together. AI answers are sent through `SendRichMessageAsync` and formatted as concise Telegram Rich
 Markdown. Analytics SQL uses the exact stored enum casing and explicit Malaysia `+08:00` half-open
 date ranges. If a query reports no data while recent transactions exist, the bot automatically
-returns the SQL and empty result to the planner once to repair date, enum, join, or ownership filters.
+returns the SQL and empty result to the planner once to repair date, enum, or join filters.
 Receipt analytics joins `Transactions → Receipts → ReceiptItems`, uses the receipt date when present,
 and can report individual products, quantities, item discounts, taxes, service charges, and item-level
-categories. Recent owned receipts and items are included in planning context for references such as
+categories. Recent shared receipts and items are included in planning context for references such as
 “последний чек”; transaction totals are not duplicated across their one-to-many detail rows.
 Rich Markdown supports headings, emphasis, lists, quotes, separators, and tables where they improve
 readability. If Telegram rejects malformed AI-generated Markdown, the bot retries as plain text so

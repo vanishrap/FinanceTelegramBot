@@ -39,11 +39,11 @@ public sealed class BatchProcessor(IDbContextFactory<FinanceDbContext> factory, 
   {
    var texts=batch.Messages.Where(x=>!string.IsNullOrWhiteSpace(x.Text)).OrderBy(x=>x.CreatedAt).Select(x=>$"[{x.CreatedAt:O}] {x.Text}").ToList(); var images=new List<string>();
    foreach(var message in batch.Messages.Where(x=>x.Type!=InputMessageType.Text && x.TelegramFileId!=null)) { var file=await telegram.DownloadAsync(message.TelegramFileId!,ct); if(message.Type==InputMessageType.Voice){message.Transcript=await transcription.TranscribeAsync(file,ct);texts.Add($"[{message.CreatedAt:O}] {message.Transcript}");} else images.Add($"data:{file.ContentType};base64,{Convert.ToBase64String(file.Content)}"); }
-   var accounts=await db.Accounts.Where(x=>x.IsActive&&(x.OwnerUserId==null||x.OwnerUserId==batch.UserId)).Select(x=>new{x.Id,x.Name,x.CurrencyCode}).ToListAsync(ct); var categories=await db.Categories.Where(x=>x.IsActive).Select(x=>new{x.Id,x.Name,x.ParentId,x.Type}).ToListAsync(ct);
-   var recentTransactions=await db.Transactions.Where(x=>x.CreatedByUserId==batch.UserId).OrderByDescending(x=>x.Id).Take(50).Select(x=>new{x.Id,x.Type,x.TransactionDate,x.CurrencyCode,x.Amount,x.Description,x.MerchantName,x.CategoryId,AccountIds=x.Movements.OrderBy(m=>m.Id).Select(m=>m.AccountId).ToList()}).ToListAsync(ct);
-   var recentDebts=await db.Debts.Where(x=>x.CreatedByUserId==batch.UserId).OrderByDescending(x=>x.Id).Take(50).Select(x=>new{x.Id,x.Direction,x.Counterparty,x.CurrencyCode,x.OriginalAmount,x.Description,x.CreatedAt,x.Status}).ToListAsync(ct);
-   var recentReceipts=await db.Receipts.Where(x=>x.Transaction.CreatedByUserId==batch.UserId).OrderByDescending(x=>x.Id).Take(20).Select(x=>new{x.Id,x.TransactionId,x.MerchantName,x.ReceiptDate,x.Subtotal,x.Tax,x.ServiceCharge,x.Discount,x.Rounding,x.Total,x.CurrencyCode}).ToListAsync(ct);
-   var recentReceiptItems=await db.ReceiptItems.Where(x=>x.Receipt.Transaction.CreatedByUserId==batch.UserId).OrderByDescending(x=>x.ReceiptId).ThenBy(x=>x.Id).Take(100).Select(x=>new{x.Id,x.ReceiptId,x.RawName,x.NormalizedName,x.Quantity,x.UnitPrice,x.BaseAmount,x.Discount,x.TaxAllocated,x.ServiceChargeAllocated,x.FinalAmount,x.CategoryId,Category=x.Category==null?null:x.Category.Name}).ToListAsync(ct);
+   var accounts=await db.Accounts.Where(x=>x.IsActive).Select(x=>new{x.Id,x.Name,x.CurrencyCode}).ToListAsync(ct); var categories=await db.Categories.Where(x=>x.IsActive).Select(x=>new{x.Id,x.Name,x.ParentId,x.Type}).ToListAsync(ct);
+   var recentTransactions=await db.Transactions.OrderByDescending(x=>x.Id).Take(50).Select(x=>new{x.Id,x.Type,x.TransactionDate,x.CurrencyCode,x.Amount,x.Description,x.MerchantName,x.CategoryId,AccountIds=x.Movements.OrderBy(m=>m.Id).Select(m=>m.AccountId).ToList()}).ToListAsync(ct);
+   var recentDebts=await db.Debts.OrderByDescending(x=>x.Id).Take(50).Select(x=>new{x.Id,x.Direction,x.Counterparty,x.CurrencyCode,x.OriginalAmount,x.Description,x.CreatedAt,x.Status}).ToListAsync(ct);
+   var recentReceipts=await db.Receipts.OrderByDescending(x=>x.Id).Take(20).Select(x=>new{x.Id,x.TransactionId,x.MerchantName,x.ReceiptDate,x.Subtotal,x.Tax,x.ServiceCharge,x.Discount,x.Rounding,x.Total,x.CurrencyCode}).ToListAsync(ct);
+   var recentReceiptItems=await db.ReceiptItems.OrderByDescending(x=>x.ReceiptId).ThenBy(x=>x.Id).Take(100).Select(x=>new{x.Id,x.ReceiptId,x.RawName,x.NormalizedName,x.Quantity,x.UnitPrice,x.BaseAmount,x.Discount,x.TaxAllocated,x.ServiceChargeAllocated,x.FinalAmount,x.CategoryId,Category=x.Category==null?null:x.Category.Name}).ToListAsync(ct);
    var context=JsonSerializer.Serialize(new{accounts,categories,recentTransactions,recentDebts,recentReceipts,recentReceiptItems,defaultCurrency=options.DefaultCurrency,currentDateTime=DateTimeOffset.UtcNow.ToOffset(MalaysiaOffset),timeZone="Asia/Kuala_Lumpur (UTC+08:00)",databaseSchema="Users(Id,TelegramUserId,Name); Accounts(Id,Name,CurrencyCode,OwnerUserId,IsActive); Categories(Id,Name,ParentId,Type,IsActive); Transactions(Id,CreatedByUserId,Type,TransactionDate,CurrencyCode,Amount,Description,MerchantName,CategoryId); AccountMovements(Id,TransactionId,AccountId,Amount); ExchangeDetails(TransactionId,FromAmount,FromCurrency,ToAmount,ToCurrency,ExchangeRate); Receipts(Id,TransactionId,MerchantName,ReceiptDate,Subtotal,Tax,ServiceCharge,Discount,Rounding,Total,CurrencyCode); ReceiptItems(Id,ReceiptId,RawName,NormalizedName,Quantity,UnitPrice,BaseAmount,Discount,TaxAllocated,ServiceChargeAllocated,FinalAmount,CategoryId); Debts(Id,CreatedByUserId,Direction,Counterparty,CurrencyCode,OriginalAmount,Description,CreatedAt,Status); DebtPayments(Id,DebtId,TransactionId,Amount,PaidAt)"});
    run=new AiRun{InputBatchId=id,Model=options.OpenAiModel,InputJson=JsonSerializer.Serialize(new{texts,imageCount=images.Count,context}),StartedAt=DateTimeOffset.UtcNow,Status=RunStatus.Running}; db.AiRuns.Add(run); await db.SaveChangesAsync(ct);
    logger.LogDebug("Database write: AiRunId={AiRunId}, InputBatchId={InputBatchId}, Model={Model}, InputJson={InputJson}, Status={Status}",run.Id,run.InputBatchId,run.Model,run.InputJson,run.Status);
@@ -52,13 +52,13 @@ public sealed class BatchProcessor(IDbContextFactory<FinanceDbContext> factory, 
    if(plan.IsQuestion)
    {
     if(string.IsNullOrWhiteSpace(plan.Sql)){batch.Status=BatchStatus.NeedsReview;run.Status=RunStatus.Completed;run.OutputJson=JsonSerializer.Serialize(plan);run.CompletedAt=DateTimeOffset.UtcNow;await db.SaveChangesAsync(ct);await NotifyAsync(batch.User.TelegramUserId,plan.ClarificationQuestion??"Уточните, пожалуйста, какой финансовый показатель и период нужно проанализировать.",ct);return;}
-    var results=await queryExecutor.ExecuteAsync(plan.Sql,batch.UserId,ct);
+    var results=await queryExecutor.ExecuteAsync(plan.Sql,ct);
     if(recentTransactions.Count>0&&IsAnalyticsResultEmpty(results))
     {
-     var queryFeedback=JsonSerializer.Serialize(new{instruction="The SQL returned no financial data even though recentTransactions contains user transactions. Correct enum casing, Malaysia date boundaries, joins, and user scoping. Return a complete replacement analytics plan.",failedSql=plan.Sql,queryResult=JsonSerializer.Deserialize<JsonElement>(results,JsonOptions)},JsonOptions);
+     var queryFeedback=JsonSerializer.Serialize(new{instruction="The SQL returned no financial data even though recentTransactions contains shared family transactions. Correct enum casing, Malaysia date boundaries, and joins. Return a complete replacement analytics plan without filtering by user.",failedSql=plan.Sql,queryResult=JsonSerializer.Deserialize<JsonElement>(results,JsonOptions)},JsonOptions);
      logger.LogWarning("Automatically replanning empty analytics query for InputBatchId={InputBatchId}: {Feedback}",id,queryFeedback);
      var revisedPlan=await analytics.PlanAsync(new AiInput([..texts,$"[AUTOMATIC QUERY FEEDBACK] {queryFeedback}"],images,context),ct);
-     if(revisedPlan.IsQuestion&&!string.IsNullOrWhiteSpace(revisedPlan.Sql)){plan=revisedPlan;results=await queryExecutor.ExecuteAsync(plan.Sql,batch.UserId,ct);}
+     if(revisedPlan.IsQuestion&&!string.IsNullOrWhiteSpace(revisedPlan.Sql)){plan=revisedPlan;results=await queryExecutor.ExecuteAsync(plan.Sql,ct);}
     }
     var answer=await analytics.AnswerAsync(aiInput,plan,results,ct);
     run.OutputJson=JsonSerializer.Serialize(new{plan,results,answer});run.Status=RunStatus.Completed;run.CompletedAt=DateTimeOffset.UtcNow;batch.Status=BatchStatus.Completed;batch.CompletedAt=DateTimeOffset.UtcNow;await db.SaveChangesAsync(ct);await NotifyAsync(batch.User.TelegramUserId,answer,ct);return;
@@ -75,16 +75,16 @@ public sealed class BatchProcessor(IDbContextFactory<FinanceDbContext> factory, 
     Transaction? target=null; Debt? targetDebt=null;
     if(isMutation)
     {
-     target=operation.TargetTransactionId is long targetId ? await db.Transactions.Include(x=>x.Movements).SingleOrDefaultAsync(x=>x.Id==targetId&&x.CreatedByUserId==batch.UserId,ct) : null;
+     target=operation.TargetTransactionId is long targetId ? await db.Transactions.Include(x=>x.Movements).SingleOrDefaultAsync(x=>x.Id==targetId,ct) : null;
      if(operation.TargetTransactionId is null) checks.Add(new("ExactTarget",1,0,false,"Укажите точный ID одной операции."));
-     else if(target is null) checks.Add(new("OwnedTarget",1,0,false,$"Операция ID {operation.TargetTransactionId} не найдена или принадлежит другому пользователю."));
+     else if(target is null) checks.Add(new("SharedTarget",1,0,false,$"Операция ID {operation.TargetTransactionId} не найдена."));
      if(operation.Kind=="Correction"&&operation.Amount<=0) checks.Add(new("CorrectionAmount",1,operation.Amount,false,"Новая сумма должна быть больше нуля."));
     }
     if(operation.Kind=="DebtToExpense")
     {
-     targetDebt=operation.TargetDebtId is long debtId ? await db.Debts.SingleOrDefaultAsync(x=>x.Id==debtId&&x.CreatedByUserId==batch.UserId,ct) : null;
+     targetDebt=operation.TargetDebtId is long debtId ? await db.Debts.SingleOrDefaultAsync(x=>x.Id==debtId,ct) : null;
      if(operation.TargetDebtId is null) checks.Add(new("ExactDebtTarget",1,0,false,"Укажите точный ID долга."));
-     else if(targetDebt is null) checks.Add(new("OwnedDebtTarget",1,0,false,$"Долг ID {operation.TargetDebtId} не найден или принадлежит другому пользователю."));
+     else if(targetDebt is null) checks.Add(new("SharedDebtTarget",1,0,false,$"Долг ID {operation.TargetDebtId} не найден."));
      else if(targetDebt.Status!=DebtStatus.Open) checks.Add(new("OpenDebt",1,0,false,$"Долг ID {targetDebt.Id} уже закрыт или отменён."));
      else if(targetDebt.Direction!=DebtDirection.Payable) checks.Add(new("PayableDebt",1,0,false,"Только долг, который вы должны, можно переклассифицировать в расход."));
     }
@@ -94,14 +94,14 @@ public sealed class BatchProcessor(IDbContextFactory<FinanceDbContext> factory, 
     if((operation.Kind is "Expense" or "Income" or "Correction")&&!hasSpecificPurpose) checks.Add(new("Purpose",1,0,false,"Уточните назначение операции."));
     if(category is not null&&operation.Kind=="Expense"&&category.Type!=CategoryType.Expense) checks.Add(new("CategoryType",1,0,false,$"{operation.Description}: выбрана категория дохода для расхода."));
     if(category is not null&&operation.Kind=="Income"&&category.Type!=CategoryType.Income) checks.Add(new("CategoryType",1,0,false,$"{operation.Description}: выбрана категория расхода для дохода."));
-    Account? account=operation.AccountId is long accountId ? await db.Accounts.SingleOrDefaultAsync(x=>x.Id==accountId&&x.IsActive&&(x.OwnerUserId==null||x.OwnerUserId==batch.UserId),ct) : null;
+    Account? account=operation.AccountId is long accountId ? await db.Accounts.SingleOrDefaultAsync(x=>x.Id==accountId&&x.IsActive,ct) : null;
     if(operation.Kind=="Correction"&&operation.CategoryId is not null&&category is null) checks.Add(new("CorrectionCategory",1,0,false,"Указанная категория не найдена."));
     if(operation.Kind=="Correction"&&operation.AccountId is not null&&account is null) checks.Add(new("CorrectionAccount",1,0,false,"Указанный счёт не найден или недоступен."));
     if((operation.Kind is "Expense" or "Income" or "BalanceAdjustment" or "DebtSettlement")&&account is null) checks.Add(new("Account",1,0,false,$"{operation.Merchant??operation.Description}: не удалось определить счёт."));
     if(operation.Kind=="DebtToExpense"&&account is null) checks.Add(new("DebtExpenseAccount",1,0,false,"Уточните счёт, с которого был оплачен расход."));
     if(operation.Kind=="DebtToExpense"&&category is null) checks.Add(new("DebtExpenseCategory",1,0,false,"Уточните категорию расхода."));
     if(operation.Kind=="DebtToExpense"&&category is not null&&category.Type!=CategoryType.Expense) checks.Add(new("DebtExpenseCategoryType",1,0,false,"Для расхода нужна категория расходов."));
-    Account? toAccount=operation.ToAccountId is long toAccountId ? await db.Accounts.SingleOrDefaultAsync(x=>x.Id==toAccountId&&x.IsActive&&(x.OwnerUserId==null||x.OwnerUserId==batch.UserId),ct) : null;
+    Account? toAccount=operation.ToAccountId is long toAccountId ? await db.Accounts.SingleOrDefaultAsync(x=>x.Id==toAccountId&&x.IsActive,ct) : null;
     if(operation.Kind=="Transfer"&&(account is null||toAccount is null)) checks.Add(new("TransferAccounts",2,(account is null?0:1)+(toAccount is null?0:1),false,$"{operation.Description}: нужны исходный и целевой счета."));
     if(!string.IsNullOrWhiteSpace(operation.ClarificationQuestion)) checks.Add(new("Clarification",1,0,false,operation.ClarificationQuestion));
     if(operation.Kind=="DebtCreate") { if(operation.Amount<=0) checks.Add(new("DebtAmount",1,operation.Amount,false,"Уточните положительную сумму долга."));if(string.IsNullOrWhiteSpace(operation.Counterparty))checks.Add(new("DebtCounterparty",1,0,false,"Уточните контрагента долга."));if(!Enum.TryParse<DebtDirection>(operation.DebtDirection,true,out _))checks.Add(new("DebtDirection",1,0,false,"Уточните, кто кому должен.")); }
