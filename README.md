@@ -27,6 +27,10 @@ docker run --env-file .env -v finance-data:/data finance-bot
 On Railway, mount a volume at `/data` and configure the variables from `.env.example`.
 Only Telegram users listed in `ALLOWED_TELEGRAM_USER_IDS` are accepted; all other updates are
 acknowledged without being persisted.
+OpenAI calls allow five minutes per attempt and twenty minutes across retries by default, so large
+receipts are not aborted by the standard HTTP handler's ten-second timeout. Override these limits
+with `OPENAI_ATTEMPT_TIMEOUT_SECONDS` and `OPENAI_TOTAL_TIMEOUT_SECONDS` when necessary; the total
+must be greater than the per-attempt timeout.
 
 ## Telegram commands
 
@@ -43,6 +47,15 @@ transaction date is stored; otherwise the current date and time in Malaysia (UTC
 If one message describes several operations, each operation is extracted, validated, and recorded
 separately in one atomic batch—for example, taxi and restaurant expenses become two transactions,
 not one combined expense and not a sequence of unnecessary clarification questions.
+
+Existing transactions can also be corrected or deleted in natural language. Corrections use the
+transaction ID shown in the recording confirmation and retain unchanged fields from recent history.
+Deletion is deliberately limited to one exact, user-owned transaction ID per request: broad filters
+and AI-generated delete queries are never executed. Every correction and deletion is recorded in
+the audit log with the previous value.
+
+An open payable debt can be reclassified as an expense by its debt ID. The bot copies the stored
+amount, currency, description, and date, then cancels the original debt so it is not counted twice.
 
 The bot also records debts from natural language, including the amount, currency, counterparty, and
 direction. `Payable` means that the user owes the counterparty; `Receivable` means that the
