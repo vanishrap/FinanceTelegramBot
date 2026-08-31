@@ -24,10 +24,29 @@ docker build -t finance-bot .
 docker run --env-file .env -v finance-data:/data finance-bot
 ```
 
-On Railway, mount a volume at `/data` and configure the variables from `.env.example`.
-Application logs are written as UTF-8 (with a BOM for reliable Windows viewer detection) to daily
-files in `/data/logs`. Files older than seven days are removed automatically. Set `LOG_DIRECTORY`
-to use another persistent directory. Errors and fatal events are also written to standard error.
+### Railway configuration
+
+Railway does not read the repository's local `.env` file automatically. Open the deployed service
+in Railway, select **Variables**, click **New Variable** (or **Raw Editor**), and add at least:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=your_token_from_BotFather
+OPENAI_API_KEY=your_openai_api_key
+ALLOWED_TELEGRAM_USER_IDS=123456789
+```
+
+Variable names are case-sensitive and must not contain the backslashes sometimes used to escape
+underscores in formatted text: use `TELEGRAM_BOT_TOKEN`, not `TELEGRAM\_BOT\_TOKEN`. Railway
+automatically redeploys the service after the variables are saved; manually redeploy it if the
+running deployment does not restart. The `TELEGRAM_BOT_TOKEN is required` startup error means that
+the variable is absent from that specific service or its value is empty. For a shared variable,
+add a reference to it in the bot service rather than defining it only at the project level.
+
+Mount a Railway volume at `/data` to preserve the SQLite database and logs between deployments.
+Application error and fatal logs are written as UTF-8 (with a BOM for reliable Windows viewer
+detection) to daily files in `/data/logs`; lower-severity events are not written to the filesystem.
+Files older than seven days are removed automatically. Set `LOG_DIRECTORY` to use another
+persistent directory. Errors and fatal events are also written to standard error.
 Routine Telegram HTTP logs are suppressed because their request URLs contain the bot token.
 JSON payloads in diagnostic logs preserve Unicode characters instead of rendering them as
 `\uXXXX` escape sequences.

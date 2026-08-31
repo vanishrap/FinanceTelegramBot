@@ -33,6 +33,7 @@ builder.Services.AddSerilog((_,configuration)=>configuration
     .WriteTo.File(
         Path.Combine(logDirectory,"finance-bot-.log"),
         encoding:new UTF8Encoding(encoderShouldEmitUTF8Identifier:true),
+        restrictedToMinimumLevel:Serilog.Events.LogEventLevel.Error,
         rollingInterval:RollingInterval.Day,
         retainedFileCountLimit:null,
         retainedFileTimeLimit:TimeSpan.FromDays(7)));
