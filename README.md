@@ -25,8 +25,10 @@ docker run --env-file .env -v finance-data:/data finance-bot
 ```
 
 On Railway, mount a volume at `/data` and configure the variables from `.env.example`.
-Application logs are written to daily files in `/data/logs` instead of the console. Files older
-than seven days are removed automatically. Set `LOG_DIRECTORY` to use another persistent directory.
+Application logs are written as UTF-8 (with a BOM for reliable Windows viewer detection) to daily
+files in `/data/logs`. Files older than seven days are removed automatically. Set `LOG_DIRECTORY`
+to use another persistent directory. Errors and fatal events are also written to standard error.
+Routine Telegram HTTP logs are suppressed because their request URLs contain the bot token.
 Only Telegram users listed in `ALLOWED_TELEGRAM_USER_IDS` are accepted; all other updates are
 acknowledged without being persisted.
 OpenAI calls allow up to five minutes for an AI request by default, so large
