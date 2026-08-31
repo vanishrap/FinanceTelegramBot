@@ -66,6 +66,15 @@ the audit log with the previous value.
 An open payable debt can be reclassified as an expense by its debt ID. The bot copies the stored
 amount, currency, description, and date, then cancels the original debt so it is not counted twice.
 
+Existing transactions can also be corrected or deleted in natural language. Corrections use the
+transaction ID shown in the recording confirmation and retain unchanged fields from recent history.
+Deletion is deliberately limited to one exact, user-owned transaction ID per request: broad filters
+and AI-generated delete queries are never executed. Every correction and deletion is recorded in
+the audit log with the previous value.
+
+An open payable debt can be reclassified as an expense by its debt ID. The bot copies the stored
+amount, currency, description, and date, then cancels the original debt so it is not counted twice.
+
 The bot also records debts from natural language, including the amount, currency, counterparty, and
 direction. `Payable` means that the user owes the counterparty; `Receivable` means that the
 counterparty owes the user. If either party or the direction is unclear, the bot asks a follow-up
