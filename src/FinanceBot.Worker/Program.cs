@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Text;
 using FinanceBot.Application;
 using FinanceBot.Infrastructure.OpenAI;
 using FinanceBot.Infrastructure.Persistence;
@@ -26,8 +27,12 @@ builder.Logging.ClearProviders();
 builder.Services.AddSerilog((_,configuration)=>configuration
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
+    .WriteTo.Console(
+        restrictedToMinimumLevel:Serilog.Events.LogEventLevel.Error,
+        standardErrorFromLevel:Serilog.Events.LogEventLevel.Error)
     .WriteTo.File(
         Path.Combine(logDirectory,"finance-bot-.log"),
+        encoding:new UTF8Encoding(encoderShouldEmitUTF8Identifier:true),
         rollingInterval:RollingInterval.Day,
         retainedFileCountLimit:null,
         retainedFileTimeLimit:TimeSpan.FromDays(7)));
@@ -43,14 +48,23 @@ builder.Services.AddHttpClient<ITelegramClient,TelegramHttpClient>(x=>x.BaseAddr
     resilience.CircuitBreaker.SamplingDuration=TimeSpan.FromSeconds(90);
     resilience.TotalRequestTimeout.Timeout=TimeSpan.FromMinutes(2);
 });
-builder.Services.AddHttpClient<IVoiceTranscriptionService,VoiceTranscriptionService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler(resilience=>ConfigureOpenAiTimeouts(resilience,options));
-builder.Services.AddHttpClient<IAiExtractionService,AiExtractionService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler(resilience=>ConfigureOpenAiTimeouts(resilience,options));
-builder.Services.AddHttpClient<IAiAnalyticsService,AiAnalyticsService>(x=>{x.BaseAddress=new("https://api.openai.com/v1/");x.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);}).AddStandardResilienceHandler(resilience=>ConfigureOpenAiTimeouts(resilience,options));
+builder.Services.AddHttpClient<IVoiceTranscriptionService,VoiceTranscriptionService>(x=>ConfigureOpenAiClient(x,options)).AddStandardResilienceHandler(resilience=>ConfigureOpenAiTimeouts(resilience,options));
+builder.Services.AddHttpClient<IAiExtractionService,AiExtractionService>(x=>ConfigureOpenAiClient(x,options)).AddStandardResilienceHandler(resilience=>ConfigureOpenAiTimeouts(resilience,options));
+builder.Services.AddHttpClient<IAiAnalyticsService,AiAnalyticsService>(x=>ConfigureOpenAiClient(x,options)).AddStandardResilienceHandler(resilience=>ConfigureOpenAiTimeouts(resilience,options));
 builder.Services.AddSingleton<IAnalyticsQueryExecutor,AnalyticsQueryExecutor>();
 builder.Services.AddSingleton<MessageBatchService>();builder.Services.AddSingleton<AccountCommandService>();builder.Services.AddSingleton<BatchProcessor>();builder.Services.AddHostedService<PollingWorker>();builder.Services.AddHostedService<BatchProcessingWorker>();
 var host=builder.Build();
 await using(var scope=host.Services.CreateAsyncScope()){var factory=scope.ServiceProvider.GetRequiredService<IDbContextFactory<FinanceDbContext>>();await using var db=await factory.CreateDbContextAsync();await db.Database.MigrateAsync();}
 await host.RunAsync();
+
+static void ConfigureOpenAiClient(HttpClient client,FinanceOptions options)
+{
+    client.BaseAddress=new("https://api.openai.com/v1/");
+    client.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",options.OpenAiApiKey);
+    // HttpClient's 100-second default timeout otherwise cancels the request before
+    // the explicitly configured resilience timeouts can retry or report it.
+    client.Timeout=Timeout.InfiniteTimeSpan;
+}
 
 static void ConfigureOpenAiTimeouts(Microsoft.Extensions.Http.Resilience.HttpStandardResilienceOptions resilience,FinanceOptions options)
 {
