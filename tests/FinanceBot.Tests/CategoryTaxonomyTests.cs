@@ -22,6 +22,10 @@ public sealed class CategoryTaxonomyTests
             Assert.Equal("Транспорт", taxi.Parent?.Name);
             Assert.Equal(CategoryType.Expense, taxi.Type);
             Assert.Contains(await db.Categories.ToListAsync(), x => x.Name == "Зарплата" && x.Type == CategoryType.Income);
+            var cosmetics = await db.Categories.Include(x => x.Parent).SingleAsync(x => x.Name == "Косметика");
+            Assert.Equal("Покупки", cosmetics.Parent?.Name);
+            var medicine = await db.Categories.Include(x => x.Parent).SingleAsync(x => x.Name == "Лекарства");
+            Assert.Equal("Здоровье", medicine.Parent?.Name);
         }
         finally
         {
