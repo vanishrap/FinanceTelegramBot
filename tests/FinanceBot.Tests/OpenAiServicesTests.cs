@@ -10,6 +10,16 @@ namespace FinanceBot.Tests;
 public sealed class OpenAiServicesTests
 {
     [Fact]
+    public void ReadableJson_PreservesUnicodeCharactersInLogText()
+    {
+        var json = ReadableJson.Serialize(new { text = "товары & услуги" });
+
+        Assert.Contains("товары & услуги", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("&#x20;", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ExtractAsync_ReadsOutputTextAfterReasoningItem()
     {
         const string extracted = """
