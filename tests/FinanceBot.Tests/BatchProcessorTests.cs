@@ -250,7 +250,7 @@ public sealed class BatchProcessorTests
             Assert.Equal(transactionDate, transaction.TransactionDate);
             var reply = Assert.Single(telegram.SentMessages);
             Assert.Contains("Транзакция записана", reply);
-            Assert.Contains("Сумма: 25.50 MYR", reply);
+            Assert.Contains("Итоговая сумма: 25.50 MYR", reply);
             Assert.Contains("Категория: Транспорт → Такси", reply);
             Assert.Contains("Счёт: Наличные", reply);
             Assert.Contains("Дата: 27.08.2026 18:30 +08:00", reply);
@@ -259,6 +259,34 @@ public sealed class BatchProcessorTests
         {
             File.Delete(databasePath);
         }
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_ReceiptConfirmationShowsEveryItemAndVerifiedTotal()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"finance-receipt-confirmation-{Guid.NewGuid():N}.db");
+        try
+        {
+            var factory = new TestDbContextFactory(databasePath);
+            var (accountId, categoryId) = await SeedAsync(factory);
+            var telegram = new RecordingTelegramClient();
+            var extraction = new StubExtractionService($$"""
+                {"kind":"Expense","amount":104.98,"currency":"MYR","description":"alexis ampang","merchant":"alexis ampang","accountId":{{accountId}},"toAccountId":null,"receipt":{"subtotal":104.98,"tax":0,"serviceCharge":0,"discount":0,"rounding":0,"total":104.98,"items":[{"name":"Суп","quantity":1,"unitPrice":28,"baseAmount":28,"discount":0,"taxAllocated":0,"serviceChargeAllocated":0,"finalAmount":28,"categoryId":{{categoryId}},"confidence":1},{"name":"Милкшейк","quantity":1,"unitPrice":19.5,"baseAmount":19.5,"discount":0,"taxAllocated":0,"serviceChargeAllocated":0,"finalAmount":19.5,"categoryId":{{categoryId}},"confidence":1},{"name":"Peach Sencha","quantity":1,"unitPrice":19.5,"baseAmount":19.5,"discount":0,"taxAllocated":0,"serviceChargeAllocated":0,"finalAmount":19.5,"categoryId":{{categoryId}},"confidence":1},{"name":"Тирамису","quantity":1,"unitPrice":37.98,"baseAmount":37.98,"discount":0,"taxAllocated":0,"serviceChargeAllocated":0,"finalAmount":37.98,"categoryId":{{categoryId}},"confidence":1}]},"categoryId":{{categoryId}},"transactionDate":null,"clarificationQuestion":null}
+                """);
+            var processor = new BatchProcessor(factory, telegram, new StubTranscriptionService(), extraction, new StubAnalyticsService(), new StubQueryExecutor(), new FinanceOptions { MessageBatchDelaySeconds = 0 }, NullLogger<BatchProcessor>.Instance);
+
+            await processor.ProcessDueAsync(CancellationToken.None);
+
+            var reply = Assert.Single(telegram.SentMessages);
+            Assert.Contains("Итоговая сумма: 104.98 MYR", reply);
+            Assert.Contains("Позиции (4):", reply);
+            Assert.Contains("1. Суп — 1 × 28.00 MYR; итог: 28.00 MYR", reply);
+            Assert.Contains("2. Милкшейк — 1 × 19.50 MYR; итог: 19.50 MYR", reply);
+            Assert.Contains("3. Peach Sencha — 1 × 19.50 MYR; итог: 19.50 MYR", reply);
+            Assert.Contains("4. Тирамису — 1 × 37.98 MYR; итог: 37.98 MYR", reply);
+            Assert.Contains("Проверка: сумма позиций 104.98 MYR совпадает с итогом ✅", reply);
+        }
+        finally { File.Delete(databasePath); }
     }
 
     [Fact]
