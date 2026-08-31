@@ -7,6 +7,7 @@ using FinanceBot.Infrastructure.Telegram;
 using FinanceBot.Worker.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Serilog;
 
 var builder=Host.CreateApplicationBuilder(args);
 // `dotnet run` does not load .env files by itself. Load it for local development,
@@ -19,6 +20,17 @@ var allowed=Value(builder.Configuration,"ALLOWED_TELEGRAM_USER_IDS",string.Join(
 var options=new FinanceOptions { TelegramBotToken=Required(builder.Configuration,"TELEGRAM_BOT_TOKEN"), OpenAiApiKey=Required(builder.Configuration,"OPENAI_API_KEY"), AllowedTelegramUserIds=allowed, OpenAiModel=Value(builder.Configuration,"OPENAI_MODEL","gpt-4.1-mini"), OpenAiTranscriptionModel=Value(builder.Configuration,"OPENAI_TRANSCRIPTION_MODEL","gpt-4o-mini-transcribe"), MessageBatchDelaySeconds=int.Parse(Value(builder.Configuration,"MESSAGE_BATCH_DELAY_SECONDS","60")), DatabasePath=Value(builder.Configuration,"DATABASE_PATH","/data/finance.db"), DefaultCurrency=Value(builder.Configuration,"DEFAULT_CURRENCY","MYR"), ValidationRoundingTolerance=decimal.Parse(Value(builder.Configuration,"VALIDATION_ROUNDING_TOLERANCE","0.05"),System.Globalization.CultureInfo.InvariantCulture), OpenAiAttemptTimeoutSeconds=int.Parse(Value(builder.Configuration,"OPENAI_ATTEMPT_TIMEOUT_SECONDS","280")), OpenAiTotalTimeoutSeconds=int.Parse(Value(builder.Configuration,"OPENAI_TOTAL_TIMEOUT_SECONDS","300")) };
 if(options.OpenAiAttemptTimeoutSeconds<=0||options.OpenAiTotalTimeoutSeconds<=options.OpenAiAttemptTimeoutSeconds) throw new InvalidOperationException("OPENAI_TOTAL_TIMEOUT_SECONDS must be greater than the positive OPENAI_ATTEMPT_TIMEOUT_SECONDS.");
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(options.DatabasePath))!);
+var logDirectory=Path.GetFullPath(Value(builder.Configuration,"LOG_DIRECTORY","/data/logs"));
+Directory.CreateDirectory(logDirectory);
+builder.Logging.ClearProviders();
+builder.Services.AddSerilog((_,configuration)=>configuration
+    .ReadFrom.Configuration(builder.Configuration)
+    .Enrich.FromLogContext()
+    .WriteTo.File(
+        Path.Combine(logDirectory,"finance-bot-.log"),
+        rollingInterval:RollingInterval.Day,
+        retainedFileCountLimit:null,
+        retainedFileTimeLimit:TimeSpan.FromDays(7)));
 builder.Services.AddSingleton(options);
 builder.Services.AddPooledDbContextFactory<FinanceDbContext>(x=>x.UseSqlite($"Data Source={options.DatabasePath};Foreign Keys=True;Default Timeout=30"));
 builder.Services.AddHttpClient<ITelegramClient,TelegramHttpClient>(x=>x.BaseAddress=new("https://api.telegram.org/")).AddStandardResilienceHandler(resilience=>
