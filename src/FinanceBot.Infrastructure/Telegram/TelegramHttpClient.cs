@@ -3,12 +3,24 @@ using System.Text.Json;
 using FinanceBot.Application;
 
 namespace FinanceBot.Infrastructure.Telegram;
+
+public sealed class TelegramPollingConflictException(string? telegramDescription)
+    : Exception(telegramDescription ?? "Another bot instance is already polling Telegram updates.");
+
 public sealed class TelegramHttpClient(HttpClient http, FinanceOptions options) : ITelegramClient
 {
     private string Url(string method) => $"/bot{options.TelegramBotToken}/{method}";
+
     public async Task<IReadOnlyList<TelegramUpdate>> GetUpdatesAsync(long offset, CancellationToken ct)
     {
-        using var response = await http.GetAsync(Url($"getUpdates?timeout=25&offset={offset}&allowed_updates=%5B%22message%22%5D"), ct); response.EnsureSuccessStatusCode();
+        using var response = await http.GetAsync(Url($"getUpdates?timeout=25&offset={offset}&allowed_updates=%5B%22message%22%5D"), ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var error = await response.Content.ReadFromJsonAsync<TelegramErrorResponse>(cancellationToken: ct);
+            throw new TelegramPollingConflictException(error?.Description);
+        }
+
+        response.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(ct)); var list = new List<TelegramUpdate>();
         foreach (var u in json.RootElement.GetProperty("result").EnumerateArray())
         {
@@ -44,4 +56,6 @@ public sealed class TelegramHttpClient(HttpClient http, FinanceOptions options) 
         using var fallback = await http.PostAsJsonAsync(Url("sendMessage"), new { chat_id = chatId, text }, ct);
         fallback.EnsureSuccessStatusCode();
     }
+
+    private sealed record TelegramErrorResponse(string? Description);
 }

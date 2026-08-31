@@ -9,7 +9,7 @@ namespace FinanceBot.Tests;
 public sealed class AnalyticsQueryExecutorTests
 {
     [Fact]
-    public async Task ExecuteAsync_ReturnsOnlyRequestedUsersRows()
+    public async Task ExecuteAsync_ReturnsSharedFamilyRows()
     {
         var path=Path.Combine(Path.GetTempPath(), $"finance-analytics-{Guid.NewGuid():N}.db");
         try
@@ -27,16 +27,15 @@ public sealed class AnalyticsQueryExecutorTests
                 var json=await new AnalyticsQueryExecutor(factory).ExecuteAsync("""
                     SELECT Description, Amount
                     FROM Transactions
-                    WHERE CreatedByUserId = $userId;
-                    """, first.Id, CancellationToken.None);
-                Assert.Contains("Coffee",json); Assert.DoesNotContain("Private",json);
+                    """, CancellationToken.None);
+                Assert.Contains("Coffee",json); Assert.Contains("Private",json);
             }
         }
         finally { File.Delete(path); }
     }
 
     [Fact]
-    public async Task ExecuteAsync_CanQueryReceiptItemsThroughOwnedTransaction()
+    public async Task ExecuteAsync_CanQuerySharedReceiptItems()
     {
         var path=Path.Combine(Path.GetTempPath(), $"finance-receipt-analytics-{Guid.NewGuid():N}.db");
         try
@@ -55,12 +54,10 @@ public sealed class AnalyticsQueryExecutorTests
                     SELECT r.Id AS ReceiptId, r.MerchantName, ri.NormalizedName, ri.FinalAmount
                     FROM ReceiptItems ri
                     JOIN Receipts r ON r.Id=ri.ReceiptId
-                    JOIN Transactions t ON t.Id=r.TransactionId
-                    WHERE t.CreatedByUserId=$userId
                     ORDER BY r.Id DESC, ri.Id;
-                    """,first.Id,CancellationToken.None);
+                    """,CancellationToken.None);
                 Assert.Contains("Watsons",json);Assert.Contains("Razor",json);Assert.Contains("29.92",json);
-                Assert.DoesNotContain("Secret item",json);Assert.DoesNotContain("999",json);
+                Assert.Contains("Secret item",json);Assert.Contains("999",json);
             }
         }
         finally { File.Delete(path); }
@@ -74,13 +71,12 @@ public sealed class AnalyticsQueryExecutorTests
     }
 
     [Theory]
-    [InlineData("DELETE FROM Transactions WHERE CreatedByUserId=$userId")]
-    [InlineData("SELECT * FROM Transactions WHERE CreatedByUserId=$userId; DROP TABLE Transactions")]
-    [InlineData("SELECT * FROM Transactions")]
+    [InlineData("DELETE FROM Transactions")]
+    [InlineData("SELECT * FROM Transactions; DROP TABLE Transactions")]
     public async Task ExecuteAsync_RejectsUnsafeSql(string sql)
     {
         var factory=new Factory(Path.Combine(Path.GetTempPath(), $"finance-analytics-{Guid.NewGuid():N}.db"));
-        await Assert.ThrowsAsync<InvalidOperationException>(()=>new AnalyticsQueryExecutor(factory).ExecuteAsync(sql,1,CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>new AnalyticsQueryExecutor(factory).ExecuteAsync(sql,CancellationToken.None));
     }
 
     private sealed class Factory(string path) : IDbContextFactory<FinanceDbContext>

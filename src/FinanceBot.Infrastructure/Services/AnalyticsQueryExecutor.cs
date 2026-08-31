@@ -12,7 +12,7 @@ public sealed class AnalyticsQueryExecutor(IDbContextFactory<FinanceDbContext> f
     private const int MaxRows = 200;
     private static readonly Regex Forbidden = new(@"(;|--|/\*|\b(pragma|attach|detach|insert|update|delete|drop|alter|create|replace|vacuum|reindex)\b)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    public async Task<string> ExecuteAsync(string sql, long userId, CancellationToken ct)
+    public async Task<string> ExecuteAsync(string sql, CancellationToken ct)
     {
         // Models commonly terminate otherwise valid SQL with a semicolon. Remove
         // one statement terminator before validation; any remaining semicolon is
@@ -20,8 +20,8 @@ public sealed class AnalyticsQueryExecutor(IDbContextFactory<FinanceDbContext> f
         var normalized = sql.Trim();
         if (normalized.EndsWith(';')) normalized = normalized[..^1].TrimEnd();
         if (!(normalized.StartsWith("select", StringComparison.OrdinalIgnoreCase) || normalized.StartsWith("with", StringComparison.OrdinalIgnoreCase)) ||
-            Forbidden.IsMatch(normalized) || !normalized.Contains("$userId", StringComparison.Ordinal))
-            throw new InvalidOperationException("Analytics SQL must be one parameterized, read-only SELECT.");
+            Forbidden.IsMatch(normalized))
+            throw new InvalidOperationException("Analytics SQL must be one read-only SELECT.");
 
         await using var db = await factory.CreateDbContextAsync(ct);
         var connection = db.Database.GetDbConnection();
@@ -29,7 +29,6 @@ public sealed class AnalyticsQueryExecutor(IDbContextFactory<FinanceDbContext> f
         await using var command = connection.CreateCommand();
         command.CommandText = normalized;
         command.CommandTimeout = 15;
-        var parameter = command.CreateParameter(); parameter.ParameterName="$userId"; parameter.Value=userId; command.Parameters.Add(parameter);
         await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct);
         var rows = new List<Dictionary<string, object?>>();
         while (rows.Count < MaxRows && await reader.ReadAsync(ct))

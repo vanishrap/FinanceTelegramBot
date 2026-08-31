@@ -22,7 +22,7 @@ public sealed class AccountCommandService(IDbContextFactory<FinanceDbContext> fa
         return command switch
         {
             "/account" => await CreateAsync(update, commandEnd < 0 ? "" : text[(commandEnd + 1)..], ct),
-            "/accounts" => await ListAsync(update.UserId, ct),
+            "/accounts" => await ListAsync(ct),
             _ => new(true, HelpText)
         };
     }
@@ -38,36 +38,25 @@ public sealed class AccountCommandService(IDbContextFactory<FinanceDbContext> fa
         var name = string.Join(' ', parts[..^2]);
 
         await using var db = await factory.CreateDbContextAsync(ct);
-        var user = await db.Users.SingleOrDefaultAsync(x => x.TelegramUserId == update.UserId, ct);
-        if (user is null)
-        {
-            user = new User { TelegramUserId = update.UserId, Name = update.UserName, CreatedAt = DateTimeOffset.UtcNow };
-            db.Users.Add(user);
-            await db.SaveChangesAsync(ct);
-        }
-
-        if (await db.Accounts.AnyAsync(x => x.OwnerUserId == user.Id && x.Name == name && x.CurrencyCode == currency, ct))
+        if (await db.Accounts.AnyAsync(x => x.Name == name && x.CurrencyCode == currency, ct))
             return new(true, $"ℹ️ Счёт «{name}» ({currency}) уже существует.");
 
-        var account = new Account { Name = name, CurrencyCode = currency, Type = type, OwnerUserId = user.Id, CreatedAt = DateTimeOffset.UtcNow };
+        var account = new Account { Name = name, CurrencyCode = currency, Type = type, OwnerUserId = null, CreatedAt = DateTimeOffset.UtcNow };
         db.Accounts.Add(account);
         await db.SaveChangesAsync(ct);
         return new(true, $"✅ Счёт создан\n\nНазвание: {account.Name}\nВалюта: {account.CurrencyCode}\nТип: {TypeName(account.Type)}\nID счёта: {account.Id}");
     }
 
-    private async Task<AccountCommandResult> ListAsync(long telegramUserId, CancellationToken ct)
+    private async Task<AccountCommandResult> ListAsync(CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var userId = await db.Users.Where(x => x.TelegramUserId == telegramUserId).Select(x => (long?)x.Id).SingleOrDefaultAsync(ct);
-        if (userId is null) return new(true, "У вас пока нет счетов. Создайте первый: /account Наличные MYR cash");
-
-        var accounts = await db.Accounts.Where(x => x.OwnerUserId == userId && x.IsActive).OrderBy(x => x.Name).ToListAsync(ct);
-        if (accounts.Count == 0) return new(true, "У вас пока нет счетов. Создайте первый: /account Наличные MYR cash");
+        var accounts = await db.Accounts.Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync(ct);
+        if (accounts.Count == 0) return new(true, "У семьи пока нет счетов. Создайте первый: /account Наличные MYR cash");
         var accountIds = accounts.Select(x => x.Id).ToList();
         var movements = await db.AccountMovements.Where(x => accountIds.Contains(x.AccountId)).Select(x => new { x.AccountId, x.Amount }).ToListAsync(ct);
         var balances = movements.GroupBy(x => x.AccountId).ToDictionary(x => x.Key, x => x.Sum(y => y.Amount));
         var lines = accounts.Select(x => $"• {x.Name} — {balances.GetValueOrDefault(x.Id):0.00} {x.CurrencyCode} ({TypeName(x.Type)}, ID {x.Id})");
-        return new(true, $"💳 Ваши счета:\n\n{string.Join("\n", lines)}");
+        return new(true, $"💳 Общие счета:\n\n{string.Join("\n", lines)}");
     }
 
     private static bool TryParseType(string value, out AccountType type)
